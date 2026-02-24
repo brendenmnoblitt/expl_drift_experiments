@@ -1,0 +1,26 @@
+flowchart LR
+  subgraph Setup["Experiment Setup"]
+    C1["Baseline window attributions A_b"] --> D["DriftDetector(A_b)"]
+    C2["Calibration windows A_cal"] --> M["DriftMonitor._calibrate(A_cal)"]
+    D --> M
+  end
+
+  subgraph Stream["Windowed Evaluation"]
+    W["For each window t:<br/>attributions A_t"] --> E["DriftMonitor.evaluate(A_t)"]
+    E --> AL["Alert level_t:<br/>OK | WARNING | CRITICAL"]
+    E --> MS["Monitored drift metrics_t"]
+  end
+
+  subgraph GroundTruth["Model Performance Signal"]
+    AC["Window accuracy_t"] --> SM["Centered rolling mean"]
+    SM --> AD["Accuracy-drop index t_acc"]
+  end
+
+  subgraph Analysis["Offline Lead-Time Analysis"]
+    MS --> LT["compute_detection_lead_time(<br/>drift_series, accuracy_series)"]
+    AD --> LT
+    LT --> OUT["Lead time (threshold method)"]
+  end
+
+  AL --> TS["Alert time series"]
+  TS --> OUT

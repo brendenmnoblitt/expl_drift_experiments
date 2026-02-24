@@ -1,0 +1,18 @@
+flowchart TD
+  IN["Inputs:<br/>drift_series d_t<br/>accuracy_series a_t"] --> BASE["Baseline stats from early windows"]
+
+  subgraph DriftFlag["Drift-Flag Method"]
+    BASE --> THR["Threshold:<br/>first t where d_t > mu_d + k sigma_d"]
+  end
+
+  subgraph AccuracyFlag["Accuracy-Drop Method (shared)"]
+    IN --> RAW["Threshold from raw a_t:<br/>mu_a - k sigma_a"]
+    IN --> SMO["Apply optional smoothing to a_t"]
+    RAW --> AF["first t where smoothed a_t < threshold"]
+    SMO --> AF
+  end
+
+  THR --> LT1["lead_time_threshold = t_acc - t_drift"]
+  AF --> LT1
+
+  LT1 --> OUT["compute_detection_lead_time output"]

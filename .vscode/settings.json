@@ -1,0 +1,5 @@
+{
+  "python.defaultInterpreterPath": "/home/brendenadm/projects/expl_drift_experiments/.venv/bin/python",
+  "python.analysis.extraPaths": ["/home/brendenadm/projects"],
+  "python.terminal.activateEnvironment": true
+}

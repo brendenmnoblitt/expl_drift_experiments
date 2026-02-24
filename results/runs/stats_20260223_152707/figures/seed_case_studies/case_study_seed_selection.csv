@@ -1,0 +1,7 @@
+experiment,role,seed,warning_lead,figure
+Concept (class-cond),positive_a,0,4.0,../results/runs/stats_20260223_152707/figures/seed_case_studies/concept_class_cond_seed0_positive_a.png
+Concept (class-cond),positive_b,13,4.0,../results/runs/stats_20260223_152707/figures/seed_case_studies/concept_class_cond_seed13_positive_b.png
+Covariate,positive_a,4,12.0,../results/runs/stats_20260223_152707/figures/seed_case_studies/covariate_seed4_positive_a.png
+Covariate,positive_b,15,12.0,../results/runs/stats_20260223_152707/figures/seed_case_studies/covariate_seed15_positive_b.png
+Mixed,positive_a,0,4.0,../results/runs/stats_20260223_152707/figures/seed_case_studies/mixed_seed0_positive_a.png
+Mixed,positive_b,13,4.0,../results/runs/stats_20260223_152707/figures/seed_case_studies/mixed_seed13_positive_b.png
