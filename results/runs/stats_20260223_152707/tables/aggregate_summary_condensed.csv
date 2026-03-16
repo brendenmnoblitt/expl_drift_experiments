@@ -1,0 +1,7 @@
+Experiment,Alert Det.,Lead-Time Det.,Median Lead [95% CI],Spearman rho
+Covariate,100%,80%,"6.0 [4.5, 8.0]",-0.649***
+Concept (pooled),96%,96%,"1.0 [0.0, 3.0]",-0.057
+Concept (class-cond),100%,100%,"3.0 [1.0, 3.0]",0.039
+Mixed,100%,100%,"1.0 [-1.0, 3.0]",-0.844***
+Natural (INSECTS),100%,100%,"0.0 [0.0, 0.0]",-0.599***
+Natural (Electricity),100%,0%,N/A,-0.505***

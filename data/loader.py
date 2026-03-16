@@ -2,6 +2,7 @@
 
 import io
 import logging
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -190,6 +191,49 @@ def load_electricity_dataset() -> tuple[pd.DataFrame, pd.Series]:
         X[col] = le.fit_transform(X[col].astype(str))
 
     y = y.astype(str).str.strip().map(lambda v: 1 if v.upper() == "UP" else 0).astype(int)
+    X = X.apply(pd.to_numeric, errors="coerce").fillna(0)
+
+    return X, y
+
+
+def load_insects_dataset(
+    variant: str = "abrupt_balanced",
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Load the INSECTS dataset from a local CSV and return (X, y) in chronological order.
+
+    ~52,848 rows (abrupt_balanced variant), 33 numeric features from optical
+    wing-beat frequency sensors, binary target derived from 6 insect species
+    grouped into two classes. Drift is induced by temperature changes inside
+    the insect trap (Souza et al. 2020).
+
+    Known drift points for abrupt_balanced: samples 14352, 19500, 33240, 38682, 39510.
+
+    Args:
+        variant: Which variant CSV to load (default: "abrupt_balanced").
+    Returns:
+        tuple[pd.DataFrame, pd.Series]: (X, y) with X in chronological order.
+    """
+    data_dir = Path(__file__).parent / "external"
+    csv_path = data_dir / f"insects_{variant}.csv"
+
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"INSECTS CSV not found at {csv_path}. "
+            f"Download from the USP DS Repository and place as {csv_path}."
+        )
+
+    df = pd.read_csv(csv_path, header=None)
+    X = df.iloc[:, :-1].copy()
+    y_raw = df.iloc[:, -1].copy()
+
+    feature_names = [f"f{i+1}" for i in range(X.shape[1])]
+    X.columns = feature_names
+
+    # Encode multiclass labels and convert to binary (first 3 vs last 3 classes)
+    le = LabelEncoder()
+    y_enc = le.fit_transform(y_raw)
+    y = pd.Series((y_enc >= len(le.classes_) // 2).astype(int))
+
     X = X.apply(pd.to_numeric, errors="coerce").fillna(0)
 
     return X, y

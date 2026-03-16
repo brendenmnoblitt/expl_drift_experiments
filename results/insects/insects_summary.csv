@@ -1,0 +1,2 @@
+Experiment,Alert Detection Rate,Lead-Time Detection Rate,Median Lead [95% CI],Mean Lead ± SEM,Spearman rho,Spearman p
+Natural (INSECTS),100%,100%,"0.0 [0.0, 0.0]",-0.2 ± 0.1,-0.599,0.0000
