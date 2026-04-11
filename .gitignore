@@ -18,3 +18,7 @@ results/models
 
 # UV Lock file
 uv.lock
+
+experiments/transformer_drift/models/
+experiments/transformer_drift/results/
+data/external
