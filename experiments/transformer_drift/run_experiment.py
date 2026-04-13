@@ -27,6 +27,7 @@ import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from expl_drift import DriftDetector, DriftMonitor, compute_detection_lead_time
+from expl_drift.drift.summarize import summarize_attributions
 from expl_drift.explanations.attention import explain_attention
 from expl_drift.explanations.ig_transformer import explain_ig_transformer
 
@@ -49,6 +50,21 @@ from experiments.transformer_drift.config import (
     WARNING_STD,
 )
 from experiments.transformer_drift.windowing import create_drifted_windows
+
+
+# Decoder-only models concentrate attention on the BOS token regardless
+# of content ("attention sink").  This dominates drift metrics and masks
+# real distributional shifts.  We zero-out the BOS position for these
+# architectures after extraction.
+_DECODER_MODEL_TYPES = {"gpt2", "phi2", "llama", "mistral"}
+
+
+def _mask_attention_sink(attrs: np.ndarray, model_type: str) -> np.ndarray:
+    """Zero out position 0 (BOS token) for decoder-only models."""
+    if model_type in _DECODER_MODEL_TYPES:
+        attrs = attrs.copy()
+        attrs[:, 0] = 0.0
+    return attrs
 
 
 def load_model(model_type: str):
@@ -151,17 +167,28 @@ def run_single_experiment(
         labels = window["label"]
 
         attrs = extract_attributions(model, tokenizer, texts, attribution_method, device)
+        attrs = _mask_attention_sink(attrs, model_type)
         all_attributions.append(attrs)
 
         acc = compute_accuracy(model, tokenizer, texts, labels, device)
         accuracies.append(acc)
         print(f"  Window {wid:2d}: acc={acc:.3f}, attrs shape={attrs.shape}")
 
+    # Decoder-only models: reduce to position-invariant summary features
+    # (positional features are meaningless for causal LMs).
+    # Encoder models: use raw positional attributions (positions carry
+    # stable signal due to CLS token and bidirectional attention).
+    is_decoder = model_type in _DECODER_MODEL_TYPES
+    if is_decoder:
+        drift_inputs = [summarize_attributions(a) for a in all_attributions]
+    else:
+        drift_inputs = all_attributions
+
     # Set up drift detection
-    baseline_attrs = all_attributions[0]
+    baseline_attrs = drift_inputs[0]
     detector = DriftDetector(baseline_attrs)
 
-    calibration_attrs = all_attributions[1:1 + N_CALIBRATION]
+    calibration_attrs = drift_inputs[1:1 + N_CALIBRATION]
     monitor = DriftMonitor(
         detector, calibration_attrs,
         warning_std=WARNING_STD,
@@ -173,12 +200,14 @@ def run_single_experiment(
     alert_levels = []
     metric_results = []
     for wid in range(eval_start, N_WINDOWS):
-        result = monitor.evaluate(all_attributions[wid])
+        result = monitor.evaluate(drift_inputs[wid])
         alert_levels.append(result["alert_level"].value)
         metric_results.append(result["metrics"])
 
-    # Compute lead time
-    drift_series = np.array([m["cosine_drift"] for m in metric_results])
+    # Decoder: use max_wasserstein (cosine_drift is near-zero with 6 mixed-scale features)
+    # Encoder: use cosine_drift (works well with positional features)
+    drift_metric = "max_wasserstein" if is_decoder else "cosine_drift"
+    drift_series = np.array([m[drift_metric] for m in metric_results])
     acc_series = np.array(accuracies[eval_start:])
     lead_time = compute_detection_lead_time(drift_series, acc_series)
 
