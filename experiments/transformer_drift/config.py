@@ -28,7 +28,7 @@ LORA_DROPOUT = 0.05
 WARMUP_RATIO = 0.1
 
 # === Drift experiment ===
-SEEDS = list(range(10))
+SEEDS = list(range(3))
 N_WINDOWS = 20
 N_CALIBRATION = 4
 WINDOW_SIZE = 500  # samples per window
@@ -39,10 +39,10 @@ DRIFT_START_WINDOW = 5  # window index where drift injection begins
 # === Attribution extraction ===
 ATTENTION_STRATEGY = "last_layer_mean"
 ATTENTION_BATCH_SIZE = 32
-IG_N_STEPS = 50
-IG_BATCH_SIZE = 2  # must be small for IG gradient memory on 8GB VRAM
+IG_N_STEPS = 10
+IG_BATCH_SIZE = 4  # reduced for GPT-2 IG on MPS (inputs_embeds path compiles slowly at higher batch)
 
 # === Drift scenarios ===
-DRIFT_TYPES = ["domain_shift", "vocabulary_shift", "class_distribution_shift"]
+DRIFT_TYPES = ["domain_shift", "vocabulary_shift", "class_distribution_shift", "preamble_shift"]
 ATTRIBUTION_METHODS = ["attention", "integrated_gradients"]
 MODEL_TYPES = ["bert", "gpt2"]

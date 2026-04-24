@@ -92,6 +92,7 @@ def main():
         metric_for_best_model="eval_loss",
         logging_steps=100,
         fp16=torch.cuda.is_available(),
+        bf16=torch.backends.mps.is_available(),
         report_to="none",
         seed=42,
     )

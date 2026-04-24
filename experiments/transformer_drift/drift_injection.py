@@ -43,7 +43,10 @@ def inject_domain_shift(
         return dataset
 
     rng = np.random.RandomState(seed + window_id)
-    fraction = min(1.0, (window_id - start_window) / max(1, n_windows - start_window))
+    # Cap at 0.5 so late windows still have some correctly-labeled source
+    # samples — this keeps accuracy from cratering too fast for the
+    # attribution signal to lead.
+    fraction = min(0.65, 0.65 * (window_id - start_window) / max(1, n_windows - start_window))
 
     labels = np.array(dataset["label"])
     texts = list(dataset["text"])
@@ -58,10 +61,13 @@ def inject_domain_shift(
     replace_indices = rng.choice(source_indices, size=n_to_replace, replace=False)
     donor_indices = rng.choice(target_indices, size=n_to_replace, replace=True)
 
-    target_texts = list(dataset["text"])
+    # Swap text but keep the ORIGINAL source_label — this creates a real
+    # text/label mismatch the classifier has to fail on.  (Previously we
+    # relabeled to target_label, which made every swapped sample still
+    # correctly labeled AG News data, so accuracy never dropped.)
+    donor_texts = list(dataset["text"])
     for src_idx, donor_idx in zip(replace_indices, donor_indices):
-        texts[src_idx] = target_texts[donor_idx]
-        labels[src_idx] = target_label
+        texts[src_idx] = donor_texts[donor_idx]
 
     return Dataset.from_dict({"text": texts, "label": labels.tolist()})
 
@@ -94,15 +100,18 @@ def inject_vocabulary_shift(
         return dataset
 
     rng = np.random.RandomState(seed + window_id)
-    fraction = min(0.06, 0.06 * (window_id - start_window) / max(1, n_windows - start_window))
+    fraction = min(0.3, 0.3 * (window_id - start_window) / max(1, n_windows - start_window))
 
-    # Out-of-domain tokens that don't belong in news articles
+    # Label-neutral pseudo-word tokens.  We avoid the previous list
+    # (blockchain / kubernetes / algorithm / ...) because those are strongly
+    # Sci/Tech-coded in AG News, so injecting them flipped labels instead
+    # of adding neutral noise — and accuracy then collapsed faster than
+    # attention patterns could drift.
     ood_tokens = [
-        "blockchain", "metaverse", "cryptocurrency", "quantum", "synergy",
-        "paradigm", "disruption", "tokenization", "decentralized", "algorithm",
-        "hyperparameter", "backpropagation", "eigenvalue", "kubernetes",
-        "microservice", "containerized", "serverless", "asynchronous",
-        "polymorphism", "refactoring",
+        "flendor", "gravnit", "blurpex", "zemnic", "qalber", "frimpton",
+        "xorbal", "wazzit", "gromlik", "oszkar", "plovith", "brantis",
+        "yurlock", "krenbal", "mivolon", "tovrith", "axentil", "drelvan",
+        "sprogil", "vuntrex",
     ]
 
     texts = list(dataset["text"])
@@ -170,7 +179,73 @@ def inject_class_distribution_shift(
     texts = [dataset["text"][i] for i in all_indices]
     new_labels = [dataset["label"][i] for i in all_indices]
 
+    # Without this, pure resampling preserves all (text, label) correctness
+    # and accuracy never drops.  Swap a growing fraction of dominant-class
+    # samples' text with an OTHER-class donor text, keeping the dominant
+    # label — so those samples become mislabeled and accuracy falls.
+    # Cap at 0.5 so late windows don't crater accuracy faster than the
+    # attribution signal can ramp.
+    corrupt_frac = min(
+        0.5, 0.5 * (window_id - start_window) / max(1, n_windows - start_window)
+    )
+    dominant_positions = [i for i, lab in enumerate(new_labels) if lab == dominant_label]
+    n_corrupt = int(corrupt_frac * len(dominant_positions))
+    if n_corrupt > 0 and len(other_indices) > 0:
+        positions_to_corrupt = rng.choice(dominant_positions, size=n_corrupt, replace=False)
+        donor_indices = rng.choice(other_indices, size=n_corrupt, replace=True)
+        for pos, donor in zip(positions_to_corrupt, donor_indices):
+            texts[pos] = dataset["text"][donor]
+
     return Dataset.from_dict({"text": texts, "label": new_labels})
+
+
+def inject_preamble_shift(
+    dataset: Dataset,
+    window_id: int,
+    start_window: int,
+    n_windows: int = 20,
+    seed: int = 42,
+    max_preamble_tokens: int = 120,
+) -> Dataset:
+    """Prepend a growing run of neutral stop-word filler to each article.
+
+    Designed to induce a gradual attention-pattern shift without immediately
+    breaking the task: early windows add a handful of filler tokens (content
+    still intact, attention mass moves slightly to earlier positions); late
+    windows push content past MAX_SEQ_LENGTH=128 and accuracy degrades.
+
+    Uses common English stop words as filler because they carry minimal
+    class signal and BERT tokenizes them to single pieces.
+
+    Args:
+        dataset: HuggingFace Dataset with "text" and "label" columns.
+        window_id: Current window index.
+        start_window: Window to begin injection.
+        n_windows: Total windows in experiment.
+        seed: Random seed.
+        max_preamble_tokens: Preamble length at final window.
+
+    Returns:
+        Modified dataset with preamble prepended.
+    """
+    if window_id < start_window:
+        return dataset
+
+    rng = np.random.RandomState(seed + window_id)
+    fraction = min(1.0, (window_id - start_window) / max(1, n_windows - start_window))
+    n_preamble = int(fraction * max_preamble_tokens)
+    if n_preamble == 0:
+        return dataset
+
+    stop_words = [
+        "the", "a", "of", "and", "to", "in", "is", "it", "that", "was",
+        "be", "but", "for", "on", "by", "with", "as", "at", "from", "or",
+    ]
+    preamble_tokens = rng.choice(stop_words, size=n_preamble, replace=True)
+    preamble = " ".join(preamble_tokens)
+
+    texts = [f"{preamble} {t}" for t in dataset["text"]]
+    return Dataset.from_dict({"text": texts, "label": list(dataset["label"])})
 
 
 # Registry for easy parameterization
@@ -178,4 +253,5 @@ DRIFT_INJECTORS = {
     "domain_shift": inject_domain_shift,
     "vocabulary_shift": inject_vocabulary_shift,
     "class_distribution_shift": inject_class_distribution_shift,
+    "preamble_shift": inject_preamble_shift,
 }
