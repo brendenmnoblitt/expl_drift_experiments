@@ -1,0 +1,59 @@
+name: Endpoint checks and container build
+
+on:
+  push:
+    branches: ['codex/**']
+    paths:
+      - 'endpoint/**'
+      - '.github/workflows/endpoint-ci.yml'
+  pull_request:
+    paths:
+      - 'endpoint/**'
+      - '.github/workflows/endpoint-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: endpoint-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+        working-directory: endpoint
+    env:
+      UV_PYTHON_DOWNLOADS: never
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Check out the tested revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12.13'
+      - name: Install locked endpoint dependencies
+        run: |
+          python -m pip install uv==0.12.4
+          uv sync --locked
+      - name: Check source and smoke script
+        run: |
+          uv run --locked ruff check src tests scripts
+          uv run --locked ruff format --check src tests scripts
+      - name: Test the extraction contract
+        run: uv run --locked pytest -q
+      - name: Build the Linux amd64 image
+        run: docker build --platform linux/amd64 -t expl-drift-endpoint:ci .
+      - name: Smoke test the container's default command
+        run: |
+          trap 'docker logs expl-drift-endpoint-ci; docker rm -f expl-drift-endpoint-ci >/dev/null' EXIT
+          docker run --detach --platform linux/amd64 \
+            --name expl-drift-endpoint-ci \
+            --publish 127.0.0.1:8000:8000 expl-drift-endpoint:ci
+          python scripts/smoke_container.py
