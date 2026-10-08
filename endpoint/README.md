@@ -41,26 +41,35 @@ checkpoint mounted at `/repository` and a CUDA-capable HF endpoint. Do not use
 the CPU scaffold as the model endpoint. Real GPU model loading and HF deployment
 are not yet qualified.
 
-## CI checks
+## CI checks and image publication
 
-The workflow at `.github/workflows/endpoint-ci.yml` runs when endpoint or workflow
-files change on a `codex/` branch push or a pull request. It installs the locked
-base environment, runs Ruff and the test suite, builds the CPU-only `scaffold`
-target, and smoke-tests it. It does not install the optional Laya model stack,
-publish images, deploy endpoints, create releases, or merge branches.
+`.github/workflows/endpoint-ci.yml` runs on endpoint/workflow changes on
+`codex/` pushes and pull requests. It checks the contract and builds/smoke-tests
+the CPU-only `scaffold` target; it does not qualify real model inference.
 
-With the local container above running, run the same smoke check in a second
-terminal from this directory:
+`.github/workflows/publish-model-image.yml` is explicitly triggered with
+`workflow_dispatch`. Run it from the desired source commit. It builds
+the Linux amd64 `model-runtime` target and publishes
+`docker.io/<Docker-Hub-username>/expl-drift-laya-endpoint:<full-commit-sha>`.
+It reuses the Docker Hub credential names used by `scry`: `DOCKERHUB_USERNAME`
+and `DOCKERHUB_TOKEN`. Those secrets must be available to this repository (or
+through organization secrets), and the account must be able to push the image.
+The job summary reports the immutable `@sha256:...` image reference. No HF
+endpoint is created or changed by this workflow.
+
+Use the immutable digest, not the tag, when configuring an HF endpoint. This
+workflow has not yet been run, so publication and registry pull access remain
+unverified.
+
+With the local CPU container running, execute the same smoke check from a second
+terminal in this directory:
 
 ```bash
 rtk proxy python3 scripts/smoke_container.py
 ```
 
-The smoke check verifies CPU scaffold liveness and its intentional not-ready
-responses. It does not exercise Laya or qualify the deployable model image.
-
-GitHub execution starts after these files are committed and pushed to the
-development branch. Local qualification alone does not confirm a hosted CI run.
+The check verifies only CPU scaffold liveness and its intentional not-ready
+responses. It does not exercise Laya or qualify the model-runtime image.
 
 ## Input contract
 
