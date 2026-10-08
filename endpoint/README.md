@@ -1,14 +1,14 @@
-# Extraction endpoint scaffold
+# Laya extraction endpoint
 
-This standalone service establishes the HTTP input boundary for classifier
-experiments. It has no model adapter yet: `/live` reports process liveness,
-`/health` returns HTTP 503 with `extraction_available: false`, and a valid
-`/extract` request returns HTTP 503. Invalid requests return HTTP 422.
-It must not be deployed as a ready inference endpoint in this state.
+The endpoint has a CPU-only validation image and a separate Laya model image.
+The model image loads the pinned English base Laya checkpoint from HF's
+`/repository` mount and serves decision scores through `/extract`. It also has an
+Integrated Gradients path for candidate-logit attribution; only decision scores
+are qualified today, so the endpoint is not yet qualified for explanation-drift runs.
 
-The endpoint package runs independently of the experiments package's eager
-training/plotting imports. It performs no drift calculations. The experiment
-runner will pass saved signals through a pinned `expl_drift` revision.
+The endpoint package is independent of the experiments package's eager
+training/plotting imports. It returns model signals only; the host-side
+experiment runner computes drift through a pinned `expl_drift` revision.
 
 ## Local checks
 
@@ -22,32 +22,32 @@ rtk uv run --locked ruff format --check src tests scripts
 rtk uv run --locked uvicorn expl_drift_endpoint.app:app --host 127.0.0.1 --port 8000
 ```
 
-The tests exercise readiness, strict validation, immutable revision requirements,
-sample/candidate identity, fixed attribution targets, and text preservation.
-They use synthetic revision fixtures and make no model calls.
+The tests exercise strict input validation, score ordering/serialization, IG
+integration and token-span invariants, unsupported attribution methods, and
+readiness with a test adapter. They use synthetic data and load no model weights.
 
 ## Container checks
 
-Build from this directory so the context excludes legacy data and artifacts:
+Build the CPU-only validation image from this directory:
 
 ```bash
-rtk proxy docker build --platform linux/amd64 -t expl-drift-endpoint:scaffold .
+rtk proxy docker build --platform linux/amd64 --target scaffold -t expl-drift-endpoint:scaffold .
 rtk proxy docker run --rm -p 127.0.0.1:8000:8000 expl-drift-endpoint:scaffold
 ```
 
-This first image is a CPU service scaffold with a pinned base-image digest and
-locked runtime dependencies. GPU dependencies, model loading, HF deployment,
-and numerical extraction parity remain subsequent increments. HF model artifacts
-will be mounted at `/repository`; the scaffold does not read that mount.
+The deployable `model-runtime` target installs the locked Laya SDK and CUDA
+PyTorch dependencies, and starts `model_app`. It requires the pinned base
+checkpoint mounted at `/repository` and a CUDA-capable HF endpoint. Do not use
+the CPU scaffold as the model endpoint. Real GPU model loading and HF deployment
+are not yet qualified.
 
 ## CI checks
 
 The workflow at `.github/workflows/endpoint-ci.yml` runs when endpoint or workflow
 files change on a `codex/` branch push or a pull request. It installs the locked
-endpoint environment, runs Ruff and the contract suite, builds Linux amd64, and
-starts the image using its default command for an HTTP smoke check. The workflow
-has read-only repository permissions and requires no HF or registry credentials.
-It does not publish images, deploy endpoints, create releases, or merge branches.
+base environment, runs Ruff and the test suite, builds the CPU-only `scaffold`
+target, and smoke-tests it. It does not install the optional Laya model stack,
+publish images, deploy endpoints, create releases, or merge branches.
 
 With the local container above running, run the same smoke check in a second
 terminal from this directory:
@@ -56,10 +56,8 @@ terminal from this directory:
 rtk proxy python3 scripts/smoke_container.py
 ```
 
-The check waits at most approximately 31 seconds for liveness, then verifies
-`/health` and valid `/extract` requests return 503 and mutable model revisions
-return 422. Its synthetic request loads no model. A qualified model adapter will
-need a different readiness/inference smoke check later.
+The smoke check verifies CPU scaffold liveness and its intentional not-ready
+responses. It does not exercise Laya or qualify the deployable model image.
 
 GitHub execution starts after these files are committed and pushed to the
 development branch. Local qualification alone does not confirm a hosted CI run.
@@ -75,12 +73,39 @@ Input text is retained exactly. Duplicate sample/candidate IDs, unknown fields,
 mutable revisions, unknown attribution targets, and implicit scalar conversions
 are rejected. Current transport bounds are 32 samples, 64 candidates, and 8192
 requested tokens; these are safety limits, not claims about model capacity.
-The adapter must later validate model-specific budgets and actual loaded pins.
+The adapter enforces the configured checkpoint revision and the model's
+`max_len`. Revision provenance comes from deployment configuration; mounted
+checkpoint contents are not independently attested yet.
 
-Successful signal responses, feature representations, token mappings, and
-extraction capability reporting will be defined with the first qualified model
-adapter. Neither attention nor integrated gradients is advertised as supported
-by this scaffold.
+The current response schema returns each sample's predicted candidate ID and
+ordered choice probabilities with `choice_probability` semantics. Requests may
+include candidate-targeted Integrated Gradients with `candidate_logit`
+semantics. The adapter rejects model/tokenizer revision mismatches, over-limit
+token requests, separate heads, other attribution methods, and representation
+requests. It advertises only `decision_scores` until IG is qualified on the
+remote GPU image.
+
+## Current implementation status
+
+The model extra pins `laya==0.3.29`; the lock fixes its Python dependencies.
+The deployable image's model loader requires CUDA and does not fall back to CPU.
+No Laya weights have been downloaded or executed during local development.
+Decision-score parity against the native SDK and GPU-image qualification remain
+open. The score path uses SDK `predict_batch`; IG uses the pinned SDK's private
+sequence builder/collator and substitutes input embeddings beneath the no-grad
+inference wrapper, while retaining Laya's decision head. Retest this path before
+changing the pinned Laya SDK version.
+
+### Implementation check on October 7 2026
+
+- Endpoint suite: 21 passed under Python 3.13.14; Ruff, format, and lock checks
+  passed. Tests validate the numerical IG integration and the token-map
+  contract, not real-model attribution.
+- Local Uvicorn smoke passed for the CPU app; it confirms only expected scaffold
+  behavior, not GPU model inference.
+- Docker image build was not available because this WSL distro has no Docker
+  Desktop integration. No model weights were downloaded, no GPU model was run,
+  and no HF endpoint was deployed.
 
 ## Qualification on October 3 2026
 

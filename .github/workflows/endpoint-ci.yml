@@ -49,7 +49,7 @@ jobs:
       - name: Test the extraction contract
         run: uv run --locked pytest -q
       - name: Build the Linux amd64 image
-        run: docker build --platform linux/amd64 -t expl-drift-endpoint:ci .
+        run: docker build --platform linux/amd64 --target scaffold -t expl-drift-endpoint:ci .
       - name: Smoke test the container's default command
         run: |
           trap 'docker logs expl-drift-endpoint-ci; docker rm -f expl-drift-endpoint-ci >/dev/null' EXIT

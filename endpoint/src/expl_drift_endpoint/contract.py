@@ -1,5 +1,6 @@
 """Versioned input contract; model-specific signal outputs follow qualification."""
 
+import math
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
@@ -41,6 +42,7 @@ class AttributionPlan(ContractModel):
 
     method: Literal["attention", "integrated_gradients"]
     target_candidate_id: Identifier
+    n_steps: int = Field(default=16, ge=2, le=64)
 
 
 class ExtractionRequest(ContractModel):
@@ -75,10 +77,77 @@ class ExtractionRequest(ContractModel):
         return self
 
 
+class CandidateScore(ContractModel):
+    """One Laya choice probability, retaining request candidate order in its list."""
+
+    candidate_id: Identifier
+    probability: float = Field(ge=0.0, le=1.0)
+
+
+class AttributionSignal(ContractModel):
+    """Fixed-width token attribution with the exact input-token mapping."""
+
+    method: Literal["integrated_gradients"]
+    target_candidate_id: Identifier
+    target_semantics: Literal["candidate_logit"]
+    baseline: Literal["pad_document_tokens"]
+    n_steps: int = Field(ge=2, le=64)
+    token_width: int = Field(ge=1, le=8192)
+    token_ids: list[int]
+    tokens: list[str]
+    segments: list[str]
+    values: list[float]
+    state_token_start: int = Field(ge=0)
+    state_token_count: int = Field(ge=0)
+    state_tokens_total: int = Field(ge=0)
+    state_tokens_dropped: int = Field(ge=0)
+    completeness_delta: float
+
+    @model_validator(mode="after")
+    def validate_token_alignment(self) -> Self:
+        """Keep every attribution aligned to its token and segment metadata."""
+        lengths = {len(self.token_ids), len(self.tokens), len(self.segments), len(self.values)}
+        if lengths != {self.token_width}:
+            raise ValueError("token IDs, strings, segments, and values must match token_width")
+        if self.state_token_start + self.state_token_count > self.token_width:
+            raise ValueError("document token span exceeds token_width")
+        if self.state_tokens_dropped != self.state_tokens_total - self.state_token_count:
+            raise ValueError("dropped token count must match total minus retained state tokens")
+        if not math.isfinite(self.completeness_delta) or any(
+            not math.isfinite(value) for value in self.values
+        ):
+            raise ValueError("attribution values and completeness delta must be finite")
+        return self
+
+
+class SampleScores(ContractModel):
+    """Decision scores aligned to one input sample."""
+
+    sample_id: Identifier
+    predicted_candidate_id: Identifier
+    scores: list[CandidateScore] = Field(min_length=2, max_length=64)
+    attribution: AttributionSignal | None = None
+
+
+class ExtractionResponse(ContractModel):
+    """Scores emitted by the qualified Laya decision head."""
+
+    schema_version: Literal["1"]
+    request_id: Identifier
+    run_id: Identifier
+    window_index: int = Field(ge=0)
+    model: ModelRevision
+    tokenizer: ModelRevision
+    score_semantics: Literal["choice_probability"]
+    samples: list[SampleScores] = Field(min_length=1, max_length=32)
+
+
 class Readiness(ContractModel):
-    """Describe the scaffold honestly until a model adapter is qualified."""
+    """Report whether the model adapter has loaded and which signal is available."""
 
     schema_version: Literal["1"] = "1"
-    status: Literal["not_ready"] = "not_ready"
-    reason: str = "No model adapter has been configured and qualified."
-    extraction_available: Literal[False] = False
+    status: Literal["not_ready", "ready"] = "not_ready"
+    reason: str | None = "No model adapter has been configured."
+    extraction_available: bool = False
+    capabilities: list[str] = Field(default_factory=list)
+    model: ModelRevision | None = None
