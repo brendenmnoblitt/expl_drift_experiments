@@ -38,8 +38,8 @@ rtk proxy docker run --rm -p 127.0.0.1:8000:8000 expl-drift-endpoint:scaffold
 The deployable `model-runtime` target installs the locked Laya SDK and CUDA
 PyTorch dependencies, and starts `model_app`. It requires the pinned base
 checkpoint mounted at `/repository` and a CUDA-capable HF endpoint. Do not use
-the CPU scaffold as the model endpoint. Real GPU model loading and HF deployment
-are not yet qualified.
+the CPU scaffold as the model endpoint. Qualification on the deployed GPU is
+required before interpreting model outputs or advertising IG capability.
 
 ## CI checks and image publication
 
@@ -57,9 +57,9 @@ through organization secrets), and the account must be able to push the image.
 The job summary reports the immutable `@sha256:...` image reference. No HF
 endpoint is created or changed by this workflow.
 
-Use the immutable digest, not the tag, when configuring an HF endpoint. This
-workflow has not yet been run, so publication and registry pull access remain
-unverified.
+Use the immutable digest, not the tag, when configuring an HF endpoint. The
+workflow has published the model-runtime image; endpoint image pull access was
+verified on the research endpoint.
 
 With the local CPU container running, execute the same smoke check from a second
 terminal in this directory:
@@ -89,23 +89,24 @@ checkpoint contents are not independently attested yet.
 The current response schema returns each sample's predicted candidate ID and
 ordered choice probabilities with `choice_probability` semantics. Requests may
 include candidate-targeted Integrated Gradients with `candidate_logit`
-semantics. IG uses 64-step Gauss-Legendre quadrature by default and rejects a
-result unless its completeness residual is at most `0.01 + 0.01 * abs(logit_delta)`.
-Token alignment, finite values, and truncation counts are validated in the response.
+semantics. IG requests default to 64-step Gauss-Legendre quadrature and may
+adaptively double to 256 steps until completeness residual is at most
+`0.01 + 0.01 * abs(logit_delta)`. Token alignment, finite values, and truncation
+counts are validated in the response.
 Health advertises only `decision_scores` until real-model GPU qualification passes.
 
 ## Current implementation status
 
 The model extra pins `laya==0.3.29`; the lock fixes its Python dependencies.
 The deployable image's model loader requires CUDA and does not fall back to CPU.
-No Laya weights have been downloaded or executed during local development.
-Decision-score parity against an independent native-SDK reference remains open.
-The score path directly calls SDK `predict_batch`; IG uses the pinned SDK's
+Model weights are not downloaded or executed locally; the pinned base model runs
+on HF. Decision-score parity against an independent native-SDK reference remains
+open. The score path directly calls SDK `predict_batch`; IG uses the pinned SDK's
 private sequence builder/collator and substitutes input embeddings beneath the
-no-grad inference wrapper, retaining Laya's decision head. The service now uses
-Gauss-Legendre integration and enforces a 1% relative / 0.01-logit absolute
-completeness tolerance; qualify this path on the deployed GPU before advertising
-IG capability. Retest before changing the pinned Laya SDK version.
+no-grad inference wrapper, retaining Laya's decision head. The service uses
+Gauss-Legendre integration, adaptively refining up to 256 steps, and enforces a
+1% relative / 0.01-logit absolute completeness tolerance. Retest before changing
+the pinned Laya SDK version.
 
 ### Implementation check on October 7 2026
 

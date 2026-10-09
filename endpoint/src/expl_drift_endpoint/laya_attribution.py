@@ -12,6 +12,7 @@ from expl_drift_endpoint.contract import AttributionSignal
 
 COMPLETENESS_ATOL = 0.01
 COMPLETENESS_RTOL = 0.01
+MAX_IG_COMPUTE_STEPS = 256
 
 
 @lru_cache(maxsize=8)
@@ -47,8 +48,12 @@ def integrate_gradients(
     return delta * gradient_sum
 
 
+def _completeness_tolerance(logit_delta: float) -> float:
+    return COMPLETENESS_ATOL + COMPLETENESS_RTOL * abs(logit_delta)
+
+
 def _validate_completeness(completeness_delta: float, logit_delta: float) -> None:
-    tolerance = COMPLETENESS_ATOL + COMPLETENESS_RTOL * abs(logit_delta)
+    tolerance = _completeness_tolerance(logit_delta)
     if abs(completeness_delta) > tolerance:
         raise RuntimeError(
             "Integrated Gradients completeness residual "
@@ -177,14 +182,25 @@ def explain_choice(
             score = _call_with_embeddings(agent, batch, point, target_index)
             return torch.autograd.grad(score, point, retain_graph=False)[0].detach()
 
-    token_attributions = integrate_gradients(input_embeds, baseline_embeds, gradient_at, n_steps)
-    if not torch.isfinite(token_attributions).all():
-        raise RuntimeError("Laya Integrated Gradients produced non-finite values")
-    token_values = token_attributions.sum(dim=-1)[0].detach().float().cpu().tolist()
-    state_values = [float(value) for value in token_values[state_start:state_end]]
     logit_delta = input_logit_value - baseline_logit_value
-    completeness_delta = logit_delta - sum(state_values)
-    _validate_completeness(completeness_delta, logit_delta)
+    integration_steps = n_steps
+    while True:
+        token_attributions = integrate_gradients(
+            input_embeds,
+            baseline_embeds,
+            gradient_at,
+            integration_steps,
+        )
+        if not torch.isfinite(token_attributions).all():
+            raise RuntimeError("Laya Integrated Gradients produced non-finite values")
+        token_values = token_attributions.sum(dim=-1)[0].detach().float().cpu().tolist()
+        state_values = [float(value) for value in token_values[state_start:state_end]]
+        completeness_delta = logit_delta - sum(state_values)
+        if abs(completeness_delta) <= _completeness_tolerance(logit_delta):
+            break
+        if integration_steps >= MAX_IG_COMPUTE_STEPS:
+            _validate_completeness(completeness_delta, logit_delta)
+        integration_steps = min(integration_steps * 2, MAX_IG_COMPUTE_STEPS)
 
     sequence_ids = list(item["ids"])
     sequence_tokens = agent.tok.convert_ids_to_tokens(sequence_ids)
@@ -219,7 +235,7 @@ def explain_choice(
         target_candidate_id=target_candidate_id,
         target_semantics="candidate_logit",
         baseline="pad_document_tokens",
-        n_steps=n_steps,
+        n_steps=integration_steps,
         token_width=width,
         token_ids=sequence_ids,
         tokens=sequence_tokens,
