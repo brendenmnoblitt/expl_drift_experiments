@@ -4,8 +4,12 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from expl_drift_endpoint.contract import AttributionSignal
-from expl_drift_endpoint.laya_attribution import integrate_gradients, state_token_span
+from expl_drift_endpoint.contract import AttributionPlan, AttributionSignal
+from expl_drift_endpoint.laya_attribution import (
+    _validate_completeness,
+    integrate_gradients,
+    state_token_span,
+)
 
 
 def test_integrated_gradients_matches_linear_score_difference():
@@ -32,6 +36,34 @@ def test_integrated_gradients_integrates_quadratic_score():
     )
 
     np.testing.assert_allclose(attributions, inputs**2)
+
+
+def test_integrated_gradients_gauss_legendre_integrates_cubic_gradient_exactly():
+    inputs = np.array([[1.5]])
+    baseline = np.zeros_like(inputs)
+
+    attributions = integrate_gradients(
+        inputs,
+        baseline,
+        lambda point: 4.0 * point**3,
+        n_steps=2,
+    )
+
+    np.testing.assert_allclose(attributions, inputs**4, rtol=1e-12, atol=1e-12)
+
+
+def test_completeness_tolerance_checks_absolute_and_relative_error():
+    _validate_completeness(completeness_delta=0.05, logit_delta=4.0)
+    _validate_completeness(completeness_delta=0.009, logit_delta=0.0)
+
+    with pytest.raises(RuntimeError, match="exceeds tolerance"):
+        _validate_completeness(completeness_delta=0.0501, logit_delta=4.0)
+    with pytest.raises(RuntimeError, match="exceeds tolerance"):
+        _validate_completeness(completeness_delta=0.0101, logit_delta=0.0)
+
+
+def test_integrated_gradients_default_uses_64_steps():
+    assert AttributionPlan(method="integrated_gradients", target_candidate_id="alpha").n_steps == 64
 
 
 def test_integrated_gradients_rejects_invalid_steps_and_shapes():

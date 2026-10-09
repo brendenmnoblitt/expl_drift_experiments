@@ -3,9 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from functools import lru_cache
 from typing import Any
 
+import numpy as np
+
 from expl_drift_endpoint.contract import AttributionSignal
+
+COMPLETENESS_ATOL = 0.01
+COMPLETENESS_RTOL = 0.01
+
+
+@lru_cache(maxsize=8)
+def _gauss_legendre_rule(n_steps: int) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    nodes, weights = np.polynomial.legendre.leggauss(n_steps)
+    return tuple(float(node) for node in nodes), tuple(float(weight) for weight in weights)
 
 
 def integrate_gradients(
@@ -14,24 +26,34 @@ def integrate_gradients(
     gradient_at: Callable[[Any], Any],
     n_steps: int,
 ) -> Any:
-    """Trapezoidal Integrated Gradients for arrays or tensors of matching shape."""
+    """Gauss-Legendre Integrated Gradients for matching arrays or tensors."""
     if n_steps < 2:
         raise ValueError("n_steps must be at least 2")
     if inputs.shape != baselines.shape:
         raise ValueError("inputs and baselines must have the same shape")
 
     delta = inputs - baselines
+    nodes, weights = _gauss_legendre_rule(n_steps)
     gradient_sum: Any = None
-    for step in range(n_steps + 1):
-        point = baselines + delta * (step / n_steps)
+    for node, weight in zip(nodes, weights, strict=True):
+        point = baselines + delta * ((node + 1.0) / 2.0)
         gradient = gradient_at(point)
         if gradient.shape != inputs.shape:
             raise ValueError("gradient_at must return a gradient with the input shape")
-        weight = 0.5 if step in (0, n_steps) else 1.0
+        weighted_gradient = gradient * (weight / 2.0)
         gradient_sum = (
-            gradient * weight if gradient_sum is None else gradient_sum + gradient * weight
+            weighted_gradient if gradient_sum is None else gradient_sum + weighted_gradient
         )
-    return delta * (gradient_sum / n_steps)
+    return delta * gradient_sum
+
+
+def _validate_completeness(completeness_delta: float, logit_delta: float) -> None:
+    tolerance = COMPLETENESS_ATOL + COMPLETENESS_RTOL * abs(logit_delta)
+    if abs(completeness_delta) > tolerance:
+        raise RuntimeError(
+            "Integrated Gradients completeness residual "
+            f"{completeness_delta:.6g} exceeds tolerance {tolerance:.6g}"
+        )
 
 
 def state_token_span(sequence_length: int, state_stats: Mapping[str, int]) -> tuple[int, int]:
@@ -160,6 +182,9 @@ def explain_choice(
         raise RuntimeError("Laya Integrated Gradients produced non-finite values")
     token_values = token_attributions.sum(dim=-1)[0].detach().float().cpu().tolist()
     state_values = [float(value) for value in token_values[state_start:state_end]]
+    logit_delta = input_logit_value - baseline_logit_value
+    completeness_delta = logit_delta - sum(state_values)
+    _validate_completeness(completeness_delta, logit_delta)
 
     sequence_ids = list(item["ids"])
     sequence_tokens = agent.tok.convert_ids_to_tokens(sequence_ids)
@@ -204,5 +229,5 @@ def explain_choice(
         state_token_count=state_tokens_used,
         state_tokens_total=total_tokens,
         state_tokens_dropped=dropped_tokens,
-        completeness_delta=input_logit_value - baseline_logit_value - sum(state_values),
+        completeness_delta=completeness_delta,
     )

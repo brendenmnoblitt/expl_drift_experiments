@@ -89,21 +89,23 @@ checkpoint contents are not independently attested yet.
 The current response schema returns each sample's predicted candidate ID and
 ordered choice probabilities with `choice_probability` semantics. Requests may
 include candidate-targeted Integrated Gradients with `candidate_logit`
-semantics. The adapter rejects model/tokenizer revision mismatches, over-limit
-token requests, separate heads, other attribution methods, and representation
-requests. It advertises only `decision_scores` until IG is qualified on the
-remote GPU image.
+semantics. IG uses 64-step Gauss-Legendre quadrature by default and rejects a
+result unless its completeness residual is at most `0.01 + 0.01 * abs(logit_delta)`.
+Token alignment, finite values, and truncation counts are validated in the response.
+Health advertises only `decision_scores` until real-model GPU qualification passes.
 
 ## Current implementation status
 
 The model extra pins `laya==0.3.29`; the lock fixes its Python dependencies.
 The deployable image's model loader requires CUDA and does not fall back to CPU.
 No Laya weights have been downloaded or executed during local development.
-Decision-score parity against the native SDK and GPU-image qualification remain
-open. The score path uses SDK `predict_batch`; IG uses the pinned SDK's private
-sequence builder/collator and substitutes input embeddings beneath the no-grad
-inference wrapper, while retaining Laya's decision head. Retest this path before
-changing the pinned Laya SDK version.
+Decision-score parity against an independent native-SDK reference remains open.
+The score path directly calls SDK `predict_batch`; IG uses the pinned SDK's
+private sequence builder/collator and substitutes input embeddings beneath the
+no-grad inference wrapper, retaining Laya's decision head. The service now uses
+Gauss-Legendre integration and enforces a 1% relative / 0.01-logit absolute
+completeness tolerance; qualify this path on the deployed GPU before advertising
+IG capability. Retest before changing the pinned Laya SDK version.
 
 ### Implementation check on October 7 2026
 
