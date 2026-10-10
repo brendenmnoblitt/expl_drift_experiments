@@ -86,7 +86,7 @@ def integrate_gradients(
         )
 
     integrated_gradient = None
-    interval_tolerance = completeness_tolerance / (2.0 * segments)
+    interval_tolerance = completeness_tolerance / segments
     left = 0.0
     left_value = gradient_at_alpha(left)
     for segment in range(segments):
@@ -258,20 +258,28 @@ def explain_choice(
             return torch.autograd.grad(score, point, retain_graph=False)[0].detach()
 
     logit_delta = input_logit_value - baseline_logit_value
-    token_attributions, integration_steps = integrate_gradients(
-        input_embeds,
-        baseline_embeds,
-        gradient_at,
-        n_steps,
-        completeness_tolerance=_completeness_tolerance(logit_delta),
-        max_steps=MAX_IG_COMPUTE_STEPS,
-    )
-    if not torch.isfinite(token_attributions).all():
-        raise RuntimeError("Laya Integrated Gradients produced non-finite values")
-    token_values = token_attributions.sum(dim=-1)[0].detach().float().cpu().tolist()
-    state_values = [float(value) for value in token_values[state_start:state_end]]
-    completeness_delta = logit_delta - sum(state_values)
-    _validate_completeness(completeness_delta, logit_delta)
+    quadrature_tolerance = _completeness_tolerance(logit_delta)
+    integration_steps = 0
+    while True:
+        token_attributions, attempt_steps = integrate_gradients(
+            input_embeds,
+            baseline_embeds,
+            gradient_at,
+            n_steps,
+            completeness_tolerance=quadrature_tolerance,
+            max_steps=MAX_IG_COMPUTE_STEPS - integration_steps,
+        )
+        integration_steps += attempt_steps
+        if not torch.isfinite(token_attributions).all():
+            raise RuntimeError("Laya Integrated Gradients produced non-finite values")
+        token_values = token_attributions.sum(dim=-1)[0].detach().float().cpu().tolist()
+        state_values = [float(value) for value in token_values[state_start:state_end]]
+        completeness_delta = logit_delta - sum(state_values)
+        if abs(completeness_delta) <= _completeness_tolerance(logit_delta):
+            break
+        if integration_steps >= MAX_IG_COMPUTE_STEPS:
+            _validate_completeness(completeness_delta, logit_delta)
+        quadrature_tolerance /= 2.0
 
     sequence_ids = list(item["ids"])
     sequence_tokens = agent.tok.convert_ids_to_tokens(sequence_ids)
