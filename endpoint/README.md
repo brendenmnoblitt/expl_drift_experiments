@@ -105,16 +105,29 @@ implementation availability only; it does not qualify IG.
 The model extra pins `laya==0.3.29`; the lock fixes its Python dependencies.
 The deployable image's model loader requires CUDA and does not fall back to CPU.
 Model weights are not downloaded or executed locally; the pinned base model runs
-on HF. Decision-score parity against an independent native-SDK reference remains
-open. The score path calls SDK `predict_batch`; IG uses the pinned SDK's private
+on HF. The score path calls SDK `predict_batch`; IG uses the pinned SDK's private
 sequence builder/collator and substitutes input embeddings while retaining the
 decision head. It disables autocast so logits and gradients use the same
 precision path. Adaptive composite Gauss-Legendre integration bisects the
-highest-error interval until completeness passes or the 8192-evaluation cap is
-hit. Numerical unit tests cover this rule, not real-model attribution.
-Remote GPU qualification remains required before interpreting explanations.
+highest-error interval until completeness passes or the 8192-evaluation cap is hit.
+The remote pilot's 24 examples passed finite-value, token-alignment, truncation,
+and hard completeness validation. Independent decision-score parity against a
+native-SDK reference remains open; do not interpret explanation drift until that
+gate passes.
 
-### Implementation check on October 7 2026
+### Remote pilot check on October 10 2026
+
+- Image workflow: [38077186563](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38077186563);
+  digest `sha256:0ae8048118177879fa0cd228e4957214ca6459103bfbd9f00b9524db86501954`.
+- HF `/health` returned 200 for the pinned base revision
+  `7b928d828b7b0e022f929d9bd2e44165aa270148`.
+- All 24 cached responses validated. Maximum actual IG cost was 2208 gradient
+  evaluations; maximum absolute residual was 0.05124, with every sample inside
+  its `0.01 + 0.01 * abs(logit_delta)` gate. Values were finite and token arrays
+  aligned.
+- Results and provenance: `../results/laya-youtube-spam-adaptive/`.
+
+### Historical CPU scaffold check on October 7 2026
 
 - Endpoint suite: 21 passed under Python 3.13.14; Ruff, format, and lock checks
   passed. Tests validate the numerical IG integration and the token-map
