@@ -15,22 +15,10 @@ COMPLETENESS_RTOL = 0.01
 MAX_IG_COMPUTE_STEPS = 256
 
 
-@lru_cache(maxsize=16)
+@lru_cache(maxsize=8)
 def _gauss_legendre_rule(n_steps: int) -> tuple[tuple[float, ...], tuple[float, ...]]:
-    """Build a composite rule with at most 32 nodes per smooth subinterval."""
-    order = min(n_steps, 32)
-    while n_steps % order:
-        order -= 1
-    nodes, weights = np.polynomial.legendre.leggauss(order)
-    segments = n_steps // order
-    points = []
-    mapped_weights = []
-    for segment in range(segments):
-        left = segment / segments
-        for node, weight in zip(nodes, weights, strict=True):
-            points.append(left + (node + 1.0) / (2.0 * segments))
-            mapped_weights.append(weight / (2.0 * segments))
-    return tuple(points), tuple(mapped_weights)
+    nodes, weights = np.polynomial.legendre.leggauss(n_steps)
+    return tuple(float(node) for node in nodes), tuple(float(weight) for weight in weights)
 
 
 def integrate_gradients(
@@ -39,7 +27,7 @@ def integrate_gradients(
     gradient_at: Callable[[Any], Any],
     n_steps: int,
 ) -> Any:
-    """Composite Gauss-Legendre IG for matching arrays or tensors."""
+    """Gauss-Legendre Integrated Gradients for matching arrays or tensors."""
     if n_steps < 2:
         raise ValueError("n_steps must be at least 2")
     if inputs.shape != baselines.shape:
@@ -49,11 +37,11 @@ def integrate_gradients(
     nodes, weights = _gauss_legendre_rule(n_steps)
     gradient_sum: Any = None
     for node, weight in zip(nodes, weights, strict=True):
-        point = baselines + delta * node
+        point = baselines + delta * ((node + 1.0) / 2.0)
         gradient = gradient_at(point)
         if gradient.shape != inputs.shape:
             raise ValueError("gradient_at must return a gradient with the input shape")
-        weighted_gradient = gradient * weight
+        weighted_gradient = gradient * (weight / 2.0)
         gradient_sum = (
             weighted_gradient if gradient_sum is None else gradient_sum + weighted_gradient
         )
