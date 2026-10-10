@@ -233,7 +233,17 @@ def run(output_dir: Path) -> dict[str, Any]:
                 raise ValueError(f"cached labels differ for window {window_index}")
         response = load_cached_response(cache_path, request)
         if response is None:
-            response = client.extract(request)
+            print(
+                f"Requesting window {window_index + 1}/{len(windows)}: {request['request_id']}",
+                flush=True,
+            )
+            try:
+                response = client.extract(request)
+            except Exception as error:
+                raise RuntimeError(
+                    f"endpoint extraction failed for window {window_index} "
+                    f"({request['request_id']})"
+                ) from error
             atomic_write_json(
                 cache_path,
                 {
@@ -242,6 +252,9 @@ def run(output_dir: Path) -> dict[str, Any]:
                     "response": response,
                 },
             )
+            print(f"Validated and cached window {window_index + 1}/{len(windows)}", flush=True)
+        else:
+            print(f"Reusing validated window {window_index + 1}/{len(windows)}", flush=True)
         responses.append(response)
 
     raw_attributions = [
