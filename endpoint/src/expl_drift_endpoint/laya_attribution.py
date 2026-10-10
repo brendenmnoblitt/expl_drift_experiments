@@ -20,8 +20,10 @@ def integrate_gradients(
     n_steps: int,
     *,
     max_steps: int = MAX_IG_COMPUTE_STEPS,
+    target_delta: float | None = None,
+    completeness_tolerance: float | None = None,
 ) -> tuple[Any, int]:
-    """Integrate gradients with a composite Gauss-Legendre rule."""
+    """Integrate gradients with composite Gauss-Legendre panels."""
     import numpy as np
 
     if n_steps < 2:
@@ -30,6 +32,8 @@ def integrate_gradients(
         raise ValueError("inputs and baselines must have the same shape")
     if max_steps < 2:
         raise ValueError("max_steps must allow at least two gradient evaluations")
+    if (target_delta is None) != (completeness_tolerance is None):
+        raise ValueError("target_delta and completeness_tolerance must be supplied together")
 
     delta = inputs - baselines
     steps = min(n_steps, max_steps)
@@ -38,23 +42,88 @@ def integrate_gradients(
         if steps >= GAUSS_LEGENDRE_PANEL_ORDER and steps % GAUSS_LEGENDRE_PANEL_ORDER == 0
         else steps
     )
-    panels = steps // order
     nodes, weights = np.polynomial.legendre.leggauss(order)
-    integrated_gradient = None
     evaluations = 0
-    for panel in range(panels):
-        for node, weight in zip(nodes, weights, strict=True):
-            alpha = float((panel + (node + 1.0) / 2.0) / panels)
-            gradient = gradient_at(baselines + delta * alpha)
+
+    def integrate_interval(start: float, end: float, rule_nodes, rule_weights):
+        nonlocal evaluations
+        midpoint = (start + end) / 2.0
+        half_width = (end - start) / 2.0
+        estimate = None
+        for node, weight in zip(rule_nodes, rule_weights, strict=True):
+            point = baselines + delta * float(midpoint + half_width * node)
+            gradient = gradient_at(point)
             if gradient.shape != inputs.shape:
                 raise ValueError("gradient_at must return a gradient with the input shape")
-            contribution = gradient * float(weight / (2.0 * panels))
-            integrated_gradient = (
-                contribution if integrated_gradient is None else integrated_gradient + contribution
-            )
+            contribution = gradient * float(weight * half_width)
+            estimate = contribution if estimate is None else estimate + contribution
             evaluations += 1
+        return estimate
 
-    return delta * integrated_gradient, evaluations
+    def projected_value(estimate: Any) -> float:
+        value = (delta * estimate).sum()
+        if hasattr(value, "detach"):
+            value = value.detach().float().cpu().item()
+        return float(value)
+
+    if target_delta is None:
+        panels_count = steps // order
+        integrated_gradient = None
+        for panel in range(panels_count):
+            estimate = integrate_interval(
+                panel / panels_count, (panel + 1) / panels_count, nodes, weights
+            )
+            integrated_gradient = (
+                estimate if integrated_gradient is None else integrated_gradient + estimate
+            )
+        return delta * integrated_gradient, evaluations
+
+    if max_steps < GAUSS_LEGENDRE_PANEL_ORDER + 8:
+        raise ValueError("max_steps is too small for adaptive Gauss-Legendre integration")
+    low_nodes, low_weights = np.polynomial.legendre.leggauss(8)
+    high_nodes, high_weights = np.polynomial.legendre.leggauss(GAUSS_LEGENDRE_PANEL_ORDER)
+    panel_count = max(1, min(n_steps // GAUSS_LEGENDRE_PANEL_ORDER, max_steps // 24))
+
+    def panel_estimate(start: float, end: float) -> dict[str, Any]:
+        low = integrate_interval(start, end, low_nodes, low_weights)
+        high = integrate_interval(start, end, high_nodes, high_weights)
+        error = abs(projected_value(high - low))
+        return {"start": start, "end": end, "estimate": high, "error": error}
+
+    panels = [
+        panel_estimate(index / panel_count, (index + 1) / panel_count)
+        for index in range(panel_count)
+    ]
+    first_estimate = panels[0]["estimate"]
+    integrated_gradient = (
+        first_estimate.clone() if hasattr(first_estimate, "clone") else first_estimate.copy()
+    )
+    for panel in panels[1:]:
+        integrated_gradient += panel["estimate"]
+
+    while True:
+        residual = target_delta - projected_value(integrated_gradient)
+        if abs(residual) <= completeness_tolerance:
+            return delta * integrated_gradient, evaluations
+        if evaluations + 48 > max_steps:
+            raise RuntimeError(
+                f"Adaptive Integrated Gradients completeness residual {residual:.6g} "
+                f"exceeds tolerance {completeness_tolerance:.6g}"
+            )
+
+        index = max(
+            range(len(panels)),
+            key=lambda i: (panels[i]["error"], panels[i]["end"] - panels[i]["start"]),
+        )
+        old = panels[index]
+        midpoint = (old["start"] + old["end"]) / 2.0
+        left = panel_estimate(old["start"], midpoint)
+        right = panel_estimate(midpoint, old["end"])
+        if hasattr(integrated_gradient, "sub_"):
+            integrated_gradient.sub_(old["estimate"]).add_(left["estimate"]).add_(right["estimate"])
+        else:
+            integrated_gradient += left["estimate"] + right["estimate"] - old["estimate"]
+        panels[index : index + 1] = [left, right]
 
 
 def _completeness_tolerance(logit_delta: float) -> float:
@@ -200,29 +269,22 @@ def explain_choice(
             return torch.autograd.grad(score, point, retain_graph=False)[0].detach()
 
     logit_delta = input_logit_value - baseline_logit_value
-    integration_steps = 0
-    quadrature_steps = n_steps
-    completeness_delta = float("inf")
-    while True:
-        remaining_steps = MAX_IG_COMPUTE_STEPS - integration_steps
-        if quadrature_steps > remaining_steps:
-            _validate_completeness(completeness_delta, logit_delta)
-        token_attributions, attempt_steps = integrate_gradients(
-            input_embeds,
-            baseline_embeds,
-            gradient_at,
-            quadrature_steps,
-            max_steps=quadrature_steps,
-        )
-        integration_steps += attempt_steps
-        if not torch.isfinite(token_attributions).all():
-            raise RuntimeError("Laya Integrated Gradients produced non-finite values")
-        token_values = token_attributions.sum(dim=-1)[0].detach().float().cpu().tolist()
-        state_values = [float(value) for value in token_values[state_start:state_end]]
-        completeness_delta = logit_delta - sum(state_values)
-        if abs(completeness_delta) <= _completeness_tolerance(logit_delta):
-            break
-        quadrature_steps *= 2
+    completeness_tolerance = _completeness_tolerance(logit_delta)
+    token_attributions, integration_steps = integrate_gradients(
+        input_embeds,
+        baseline_embeds,
+        gradient_at,
+        n_steps,
+        max_steps=MAX_IG_COMPUTE_STEPS,
+        target_delta=logit_delta,
+        completeness_tolerance=completeness_tolerance,
+    )
+    if not torch.isfinite(token_attributions).all():
+        raise RuntimeError("Laya Integrated Gradients produced non-finite values")
+    token_values = token_attributions.sum(dim=-1)[0].detach().float().cpu().tolist()
+    state_values = [float(value) for value in token_values[state_start:state_end]]
+    completeness_delta = logit_delta - sum(state_values)
+    _validate_completeness(completeness_delta, logit_delta)
     sequence_ids = list(item["ids"])
     sequence_tokens = agent.tok.convert_ids_to_tokens(sequence_ids)
     sequence_segments = ["instruction"] * len(sequence_ids)

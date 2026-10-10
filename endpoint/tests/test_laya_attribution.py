@@ -76,6 +76,24 @@ def test_integrated_gradients_integrates_degree_31_path_with_composite_rule():
     assert steps == 64
 
 
+def test_adaptive_integrated_gradients_refines_the_interval_with_a_kink():
+    inputs = np.ones((1, 1))
+    baseline = np.zeros_like(inputs)
+
+    attributions, steps = integrate_gradients(
+        inputs,
+        baseline,
+        lambda point: np.where(point < 0.503, 1.0, 2.0),
+        n_steps=64,
+        max_steps=2048,
+        target_delta=1.497,
+        completeness_tolerance=1e-4,
+    )
+
+    np.testing.assert_allclose(attributions, [[1.497]], atol=1e-4)
+    assert 96 < steps <= 2048
+
+
 def test_integrated_gradients_integrates_smooth_path():
     inputs = np.array([[1.0]])
     baseline = np.zeros_like(inputs)
