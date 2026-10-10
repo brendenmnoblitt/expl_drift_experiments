@@ -103,11 +103,10 @@ Model weights are not downloaded or executed locally; the pinned base model runs
 on HF. Decision-score parity against an independent native-SDK reference remains
 open. The score path directly calls SDK `predict_batch`; IG uses the pinned SDK's
 private sequence builder/collator and substitutes input embeddings beneath the
-no-grad inference wrapper, retaining Laya's decision head. IG disables autocast
-so forward logits and gradients use the same precision path; composite
-Gauss-Legendre integration adaptively refines up to 256 steps and enforces a 1%
-relative / 0.01-logit absolute completeness tolerance. Retest before changing the
-pinned Laya SDK version.
+no-grad inference wrapper, retaining Laya's decision head. The service uses
+composite Gauss-Legendre integration, adaptively refining up to 256 steps, and
+enforces a 1% relative / 0.01-logit absolute completeness tolerance. Retest
+before changing the pinned Laya SDK version.
 
 ### Implementation check on October 7 2026
 
