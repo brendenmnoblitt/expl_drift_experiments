@@ -91,9 +91,9 @@ checkpoint contents are not independently attested yet.
 The current response schema returns each sample's predicted candidate ID and
 ordered choice probabilities with `choice_probability` semantics. Requests may
 include candidate-targeted Integrated Gradients with `candidate_logit`
-semantics. IG requests default to 64 and use global Gauss-Legendre quadrature.
-If the measured completeness residual fails, the global node count doubles up to
-8192 total gradient evaluations. The response's `n_steps` is the actual count.
+semantics. IG requests default to 64 and use composite 16-point Gauss-Legendre
+panels. If the measured completeness residual fails, the global panel count
+doubles up to 8192 total gradient evaluations. The response's `n_steps` is the actual count.
 IG is rejected unless completeness residual is at most
 `0.01 + 0.01 * abs(logit_delta)`. Token alignment, finite values, and truncation
 counts are validated in the response. Health capability advertisement indicates
@@ -108,8 +108,8 @@ on HF. Decision-score parity against an independent native-SDK reference remains
 open. The score path calls SDK `predict_batch`; IG uses the pinned SDK's private
 sequence builder/collator and substitutes input embeddings while retaining the
 decision head. It disables autocast so logits and gradients use the same
-precision path. Global Gauss-Legendre quadrature doubles its node count when the
-measured residual fails, up to 8192 total gradient evaluations. Unit tests cover
+precision path. Composite Gauss-Legendre quadrature doubles its panel count when
+the measured residual fails, up to 8192 total gradient evaluations. Unit tests cover
 numeric integration but not real-model attribution. Remote GPU qualification
 remains required before interpreting explanations.
 

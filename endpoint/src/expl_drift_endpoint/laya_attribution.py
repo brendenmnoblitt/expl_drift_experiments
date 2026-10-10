@@ -10,6 +10,7 @@ from expl_drift_endpoint.contract import AttributionSignal
 COMPLETENESS_ATOL = 0.01
 COMPLETENESS_RTOL = 0.01
 MAX_IG_COMPUTE_STEPS = 8192
+GAUSS_LEGENDRE_PANEL_ORDER = 16
 
 
 def integrate_gradients(
@@ -20,7 +21,7 @@ def integrate_gradients(
     *,
     max_steps: int = MAX_IG_COMPUTE_STEPS,
 ) -> tuple[Any, int]:
-    """Integrate gradients with a global Gauss-Legendre rule."""
+    """Integrate gradients with a composite Gauss-Legendre rule."""
     import numpy as np
 
     if n_steps < 2:
@@ -32,19 +33,26 @@ def integrate_gradients(
 
     delta = inputs - baselines
     steps = min(n_steps, max_steps)
-    nodes, weights = np.polynomial.legendre.leggauss(steps)
+    order = (
+        GAUSS_LEGENDRE_PANEL_ORDER
+        if steps >= GAUSS_LEGENDRE_PANEL_ORDER and steps % GAUSS_LEGENDRE_PANEL_ORDER == 0
+        else steps
+    )
+    panels = steps // order
+    nodes, weights = np.polynomial.legendre.leggauss(order)
     integrated_gradient = None
     evaluations = 0
-    for node, weight in zip(nodes, weights, strict=True):
-        alpha = float((node + 1.0) / 2.0)
-        gradient = gradient_at(baselines + delta * alpha)
-        if gradient.shape != inputs.shape:
-            raise ValueError("gradient_at must return a gradient with the input shape")
-        contribution = gradient * float(weight / 2.0)
-        integrated_gradient = (
-            contribution if integrated_gradient is None else integrated_gradient + contribution
-        )
-        evaluations += 1
+    for panel in range(panels):
+        for node, weight in zip(nodes, weights, strict=True):
+            alpha = float((panel + (node + 1.0) / 2.0) / panels)
+            gradient = gradient_at(baselines + delta * alpha)
+            if gradient.shape != inputs.shape:
+                raise ValueError("gradient_at must return a gradient with the input shape")
+            contribution = gradient * float(weight / (2.0 * panels))
+            integrated_gradient = (
+                contribution if integrated_gradient is None else integrated_gradient + contribution
+            )
+            evaluations += 1
 
     return delta * integrated_gradient, evaluations
 

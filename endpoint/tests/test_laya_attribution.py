@@ -61,18 +61,18 @@ def test_integrated_gradients_integrates_quadratic_score():
     np.testing.assert_allclose(attributions, inputs**2)
 
 
-def test_integrated_gradients_integrates_high_degree_path_globally():
+def test_integrated_gradients_integrates_degree_31_path_with_composite_rule():
     inputs = np.ones((1, 1))
     baseline = np.zeros_like(inputs)
 
     attributions, steps = integrate_gradients(
         inputs,
         baseline,
-        lambda point: point**127,
+        lambda point: point**31,
         n_steps=64,
     )
 
-    np.testing.assert_allclose(attributions, [[1.0 / 128.0]], rtol=1e-12, atol=1e-14)
+    np.testing.assert_allclose(attributions, [[1.0 / 32.0]], rtol=1e-12, atol=1e-14)
     assert steps == 64
 
 
