@@ -89,10 +89,10 @@ checkpoint contents are not independently attested yet.
 The current response schema returns each sample's predicted candidate ID and
 ordered choice probabilities with `choice_probability` semantics. Requests may
 include candidate-targeted Integrated Gradients with `candidate_logit`
-semantics. IG requests default to 64 and use nested composite-Simpson quadrature,
-refining the global panel grid up to 4096 gradient evaluations. The response's
-`n_steps` is the actual evaluation count. IG is rejected unless completeness
-residual is at most `0.01 + 0.01 * abs(logit_delta)`.
+semantics. IG requests default to 64 and use adaptive Simpson quadrature, refining
+locally up to 4096 gradient evaluations. The response's `n_steps` is the actual
+evaluation count. IG is rejected unless completeness residual is at most
+`0.01 + 0.01 * abs(logit_delta)`.
 Token alignment, finite values, and truncation counts are validated in the response.
 Health advertises only `decision_scores` until real-model GPU qualification passes.
 
@@ -105,8 +105,8 @@ on HF. Decision-score parity against an independent native-SDK reference remains
 open. The score path directly calls SDK `predict_batch`; IG uses the pinned SDK's
 private sequence builder/collator and substitutes input embeddings beneath the
 no-grad inference wrapper, retaining Laya's decision head. IG disables autocast
-so forward logits and gradients use the same precision path. Composite Simpson
-refinement starts with a 0.1 logit-space estimate budget and retries more tightly
+so forward logits and gradients use the same precision path. Adaptive Simpson
+starts with a 0.1 logit-space quadrature estimate budget and retries more tightly
 if the measured completeness residual fails the 1% relative / 0.01-logit
 absolute gate. The hard evaluation cap remains 4096; retest before changing the
 pinned Laya SDK version.

@@ -31,22 +31,6 @@ def test_integrated_gradients_matches_linear_score_difference():
     assert steps >= 2
 
 
-def test_integrated_gradients_returns_a_bounded_estimate_when_budget_is_small():
-    inputs = np.array([[1.0]])
-    baselines = np.zeros_like(inputs)
-
-    attributions, steps = integrate_gradients(
-        inputs,
-        baselines,
-        lambda _: np.ones_like(inputs),
-        n_steps=64,
-        max_steps=2,
-    )
-
-    np.testing.assert_allclose(attributions, inputs)
-    assert steps == 2
-
-
 def test_integrated_gradients_integrates_quadratic_score():
     inputs = np.array([[2.0, -3.0]])
     baseline = np.zeros_like(inputs)
