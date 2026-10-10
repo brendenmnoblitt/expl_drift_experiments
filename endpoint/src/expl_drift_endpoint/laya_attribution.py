@@ -99,7 +99,14 @@ def _model_inputs(agent: Any, batch: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _call_with_embeddings(agent: Any, batch: Mapping[str, Any], embeddings: Any, target_index: int):
+def _call_with_embeddings(
+    agent: Any,
+    batch: Mapping[str, Any],
+    embeddings: Any,
+    target_index: int,
+    *,
+    use_autocast: bool = True,
+):
     """Run the unchanged Laya decision head with supplied word embeddings."""
     torch = __import__("torch")
     model = agent.model
@@ -115,7 +122,11 @@ def _call_with_embeddings(agent: Any, batch: Mapping[str, Any], embeddings: Any,
     embedding_module = model.encoder.embeddings
     handle = embedding_module.register_forward_pre_hook(substitute_embeddings, with_kwargs=True)
     try:
-        with torch.autocast(device_type=device.type, dtype=agent.dtype, enabled=agent.amp_enabled):
+        with torch.autocast(
+            device_type=device.type,
+            dtype=agent.dtype,
+            enabled=agent.amp_enabled and use_autocast,
+        ):
             logits, _ = model(**values)
         return logits[0, target_index]
     finally:
@@ -171,18 +182,15 @@ def explain_choice(
         input_embeds = word_embeddings(input_ids).detach()
         baseline_embeds = word_embeddings(baseline_ids).detach()
 
-    # Prove the embedding-input hook preserves the original decision logit first.
-    with (
-        torch.no_grad(),
-        torch.autocast(
-            device_type=agent.device.type,
-            dtype=agent.dtype,
-            enabled=agent.amp_enabled,
-        ),
-    ):
+    # Keep input, baseline, and gradients on the same full-precision model path.
+    with torch.no_grad():
         direct_logits, _ = agent.model(**_model_inputs(agent, batch))
-        input_logit = _call_with_embeddings(agent, batch, input_embeds, target_index)
-        baseline_logit = _call_with_embeddings(agent, batch, baseline_embeds, target_index)
+        input_logit = _call_with_embeddings(
+            agent, batch, input_embeds, target_index, use_autocast=False
+        )
+        baseline_logit = _call_with_embeddings(
+            agent, batch, baseline_embeds, target_index, use_autocast=False
+        )
     if not torch.allclose(input_logit, direct_logits[0, target_index], rtol=1e-4, atol=1e-4):
         raise RuntimeError("Laya embedding path changed the target decision logit")
     input_logit_value = float(input_logit.float().cpu().item())
@@ -191,7 +199,7 @@ def explain_choice(
     def gradient_at(point):
         point = point.detach().requires_grad_(True)
         with torch.enable_grad():
-            score = _call_with_embeddings(agent, batch, point, target_index)
+            score = _call_with_embeddings(agent, batch, point, target_index, use_autocast=False)
             return torch.autograd.grad(score, point, retain_graph=False)[0].detach()
 
     logit_delta = input_logit_value - baseline_logit_value
