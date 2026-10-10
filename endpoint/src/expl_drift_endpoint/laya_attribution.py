@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from functools import lru_cache
 from typing import Any
+
+import numpy as np
 
 from expl_drift_endpoint.contract import AttributionSignal
 
@@ -12,33 +15,49 @@ COMPLETENESS_RTOL = 0.01
 MAX_IG_COMPUTE_STEPS = 2048
 
 
+@lru_cache(maxsize=16)
+def _gauss_legendre_rule(n_steps: int) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """Build a composite rule with at most 32 nodes per smooth subinterval."""
+    order = min(n_steps, 32)
+    while n_steps % order:
+        order -= 1
+    nodes, weights = np.polynomial.legendre.leggauss(order)
+    segments = n_steps // order
+    points = []
+    mapped_weights = []
+    for segment in range(segments):
+        left = segment / segments
+        for node, weight in zip(nodes, weights, strict=True):
+            points.append(left + (node + 1.0) / (2.0 * segments))
+            mapped_weights.append(weight / (2.0 * segments))
+    return tuple(points), tuple(mapped_weights)
+
+
 def integrate_gradients(
     inputs: Any,
     baselines: Any,
     gradient_at: Callable[[Any], Any],
     n_steps: int,
 ) -> Any:
-    """Trapezoidal Integrated Gradients for matching arrays or tensors."""
+    """Composite Gauss-Legendre IG for matching arrays or tensors."""
     if n_steps < 2:
         raise ValueError("n_steps must be at least 2")
     if inputs.shape != baselines.shape:
         raise ValueError("inputs and baselines must have the same shape")
 
     delta = inputs - baselines
-    interval_count = n_steps - 1
+    nodes, weights = _gauss_legendre_rule(n_steps)
     gradient_sum: Any = None
-    for index in range(n_steps):
-        alpha = index / interval_count
-        point = baselines + delta * alpha
+    for node, weight in zip(nodes, weights, strict=True):
+        point = baselines + delta * node
         gradient = gradient_at(point)
         if gradient.shape != inputs.shape:
             raise ValueError("gradient_at must return a gradient with the input shape")
-        weight = 0.5 if index in (0, interval_count) else 1.0
         weighted_gradient = gradient * weight
         gradient_sum = (
             weighted_gradient if gradient_sum is None else gradient_sum + weighted_gradient
         )
-    return delta * (gradient_sum / interval_count)
+    return delta * gradient_sum
 
 
 def _completeness_tolerance(logit_delta: float) -> float:

@@ -38,7 +38,7 @@ def test_integrated_gradients_integrates_quadratic_score():
     np.testing.assert_allclose(attributions, inputs**2)
 
 
-def test_integrated_gradients_trapezoid_converges_for_cubic_gradient():
+def test_integrated_gradients_gauss_legendre_integrates_cubic_gradient_exactly():
     inputs = np.array([[1.5]])
     baseline = np.zeros_like(inputs)
 
@@ -46,13 +46,13 @@ def test_integrated_gradients_trapezoid_converges_for_cubic_gradient():
         inputs,
         baseline,
         lambda point: 4.0 * point**3,
-        n_steps=4096,
+        n_steps=2,
     )
 
-    np.testing.assert_allclose(attributions, inputs**4, rtol=1e-7, atol=1e-7)
+    np.testing.assert_allclose(attributions, inputs**4, rtol=1e-12, atol=1e-12)
 
 
-def test_integrated_gradients_trapezoid_converges_for_smooth_path():
+def test_integrated_gradients_composite_rule_integrates_smooth_path():
     inputs = np.array([[1.0]])
     baseline = np.zeros_like(inputs)
 
@@ -60,10 +60,10 @@ def test_integrated_gradients_trapezoid_converges_for_smooth_path():
         inputs,
         baseline,
         np.exp,
-        n_steps=4096,
+        n_steps=256,
     )
 
-    np.testing.assert_allclose(attributions, np.expm1(inputs), rtol=1e-7, atol=1e-7)
+    np.testing.assert_allclose(attributions, np.expm1(inputs), rtol=1e-12, atol=1e-12)
 
 
 def test_completeness_tolerance_checks_absolute_and_relative_error():
