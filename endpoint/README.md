@@ -3,8 +3,9 @@
 The endpoint has a CPU-only validation image and a separate Laya model image.
 The model image loads the pinned English base Laya checkpoint from HF's
 `/repository` mount and serves decision scores through `/extract`. It also has an
-Integrated Gradients path for candidate-logit attribution; only decision scores
-are qualified today, so the endpoint is not yet qualified for explanation-drift runs.
+Integrated Gradients path for candidate-logit attribution. Health capabilities
+report implemented paths, not scientific qualification; neither IG nor drift
+interpretations are qualified until the remote checks below pass.
 
 The endpoint package is independent of the experiments package's eager
 training/plotting imports. It returns model signals only; the host-side
@@ -38,8 +39,9 @@ rtk proxy docker run --rm -p 127.0.0.1:8000:8000 expl-drift-endpoint:scaffold
 The deployable `model-runtime` target installs the locked Laya SDK and CUDA
 PyTorch dependencies, and starts `model_app`. It requires the pinned base
 checkpoint mounted at `/repository` and a CUDA-capable HF endpoint. Do not use
-the CPU scaffold as the model endpoint. Qualification on the deployed GPU is
-required before interpreting model outputs or advertising IG capability.
+the CPU scaffold as the model endpoint. Run the remote qualification checks on
+the deployed GPU before interpreting outputs; `/health` capability names only
+report implemented paths.
 
 ## CI checks and image publication
 
@@ -89,13 +91,13 @@ checkpoint contents are not independently attested yet.
 The current response schema returns each sample's predicted candidate ID and
 ordered choice probabilities with `choice_probability` semantics. Requests may
 include candidate-targeted Integrated Gradients with `candidate_logit`
-semantics. IG requests default to 64 and use nested composite-Simpson quadrature,
-refining the global panel grid up to 4096 gradient evaluations. The response's
-`n_steps` is the actual evaluation count. IG is rejected unless completeness
-residual is at most `0.01 + 0.01 * abs(logit_delta)`.
-Token alignment, finite values, and truncation counts are validated in the response.
-After remote GPU qualification, health advertises `decision_scores` and
-`integrated_gradients`.
+semantics. IG requests default to 64 and use global Gauss-Legendre quadrature.
+If the measured completeness residual fails, the global node count doubles up to
+8192 total gradient evaluations. The response's `n_steps` is the actual count.
+IG is rejected unless completeness residual is at most
+`0.01 + 0.01 * abs(logit_delta)`. Token alignment, finite values, and truncation
+counts are validated in the response. Health capability advertisement indicates
+implementation availability only; it does not qualify IG.
 
 ## Current implementation status
 
@@ -103,14 +105,13 @@ The model extra pins `laya==0.3.29`; the lock fixes its Python dependencies.
 The deployable image's model loader requires CUDA and does not fall back to CPU.
 Model weights are not downloaded or executed locally; the pinned base model runs
 on HF. Decision-score parity against an independent native-SDK reference remains
-open. The score path directly calls SDK `predict_batch`; IG uses the pinned SDK's
-private sequence builder/collator and substitutes input embeddings beneath the
-no-grad inference wrapper, retaining Laya's decision head. IG disables autocast
-so forward logits and gradients use the same precision path. Composite Simpson
-refinement starts with a 0.1 logit-space estimate budget and retries more tightly
-if the measured completeness residual fails the 1% relative / 0.01-logit
-absolute gate. The hard evaluation cap remains 4096; retest before changing the
-pinned Laya SDK version.
+open. The score path calls SDK `predict_batch`; IG uses the pinned SDK's private
+sequence builder/collator and substitutes input embeddings while retaining the
+decision head. It disables autocast so logits and gradients use the same
+precision path. Global Gauss-Legendre quadrature doubles its node count when the
+measured residual fails, up to 8192 total gradient evaluations. Unit tests cover
+numeric integration but not real-model attribution. Remote GPU qualification
+remains required before interpreting explanations.
 
 ### Implementation check on October 7 2026
 
