@@ -52,6 +52,20 @@ def test_integrated_gradients_gauss_legendre_integrates_cubic_gradient_exactly()
     np.testing.assert_allclose(attributions, inputs**4, rtol=1e-12, atol=1e-12)
 
 
+def test_integrated_gradients_composite_rule_integrates_smooth_path():
+    inputs = np.array([[1.0]])
+    baseline = np.zeros_like(inputs)
+
+    attributions = integrate_gradients(
+        inputs,
+        baseline,
+        np.exp,
+        n_steps=256,
+    )
+
+    np.testing.assert_allclose(attributions, np.expm1(inputs), rtol=1e-12, atol=1e-12)
+
+
 def test_completeness_tolerance_checks_absolute_and_relative_error():
     _validate_completeness(completeness_delta=0.05, logit_delta=4.0)
     _validate_completeness(completeness_delta=0.009, logit_delta=0.0)
