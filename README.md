@@ -116,6 +116,41 @@ full training mix is undisclosed, so overlap cannot be certified. Independent
 native-SDK score parity also remains open; do not interpret this run's IG drift
 as a qualified result until that gate passes.
 
+### Threshold replay and larger follow-up
+
+Replaying the first run's validated cache through `DriftMonitor` reconstructs
+these calibration thresholds. The original result artifact did not save them:
+
+| Metric | Calibration mean | Calibration std | Warning threshold | Largest shifted-window value |
+|---|---:|---:|---:|---:|
+| `cosine_drift` | 0.000822 | 0.000809 | 0.002845 | 0.000495 |
+| `max_jsd` | 0.606504 | 0.086643 | 0.823112 | 0.693147 |
+| `max_wasserstein` | 13.500000 | 10.000000 | 38.500000 | 11.000000 |
+
+With natural-log entropy, JSD is bounded by `ln(2) ≈ 0.693147`. The pilot's
+JSD warning threshold is above that ceiling, so that metric could not fire in
+this run. Calibration used only two four-example windows.
+
+The `calibrated` profile keeps the same model, prompt, target, dataset, and
+detector, with 100 samples in each of ten windows: one baseline, four
+calibration windows, then five windows with spam prevalence rising from 60% to
+100%. Samples are disjoint across windows. Each window is sent as validated,
+resumable requests of at most 32 samples. The run stores monitor thresholds,
+per-metric alert levels, prediction rates, and mean spam probabilities:
+
+During this run, HF's scale-to-zero timeout was temporarily raised from 15 to
+60 minutes after the endpoint scaled down during a long extraction request.
+Minimum replicas remain zero; restore the timeout to 15 minutes after the run.
+
+```bash
+LAYA_EXPERIMENT_OUTPUT="results/laya-youtube-spam-calibrated" \
+  python -m experiments.laya_endpoint.runner --profile calibrated
+```
+
+This tests whether more calibration data gives usable thresholds; it does not
+guarantee an alert. The run remains exploratory, and its IG results remain
+unqualified pending independent native-SDK score parity.
+
 ## Citation
 
 - License: `LICENSE`
