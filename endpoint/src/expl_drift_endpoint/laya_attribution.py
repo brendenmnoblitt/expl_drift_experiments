@@ -86,7 +86,7 @@ def integrate_gradients(
         )
 
     integrated_gradient = None
-    interval_tolerance = completeness_tolerance / (2.0 * segments)
+    interval_tolerance = completeness_tolerance / segments
     left = 0.0
     left_value = gradient_at_alpha(left)
     for segment in range(segments):
