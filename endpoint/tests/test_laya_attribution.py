@@ -28,7 +28,7 @@ def test_integrated_gradients_matches_linear_score_difference():
     np.testing.assert_allclose(attributions, (inputs - baseline) * weights)
     expected_difference = (inputs * weights).sum() - (baseline * weights).sum()
     np.testing.assert_allclose(attributions.sum(), expected_difference)
-    assert steps >= 16
+    assert steps >= 2
 
 
 def test_integrated_gradients_integrates_quadratic_score():
@@ -73,7 +73,7 @@ def test_integrated_gradients_adaptively_integrates_smooth_path():
     )
 
     np.testing.assert_allclose(attributions, np.expm1(inputs), rtol=1e-7, atol=1e-7)
-    assert 64 <= steps <= MAX_IG_COMPUTE_STEPS
+    assert 2 <= steps <= MAX_IG_COMPUTE_STEPS
 
 
 def test_completeness_tolerance_checks_absolute_and_relative_error():

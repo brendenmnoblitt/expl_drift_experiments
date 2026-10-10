@@ -21,7 +21,7 @@ def integrate_gradients(
     completeness_tolerance: float = 1e-6,
     max_steps: int = MAX_IG_COMPUTE_STEPS,
 ) -> tuple[Any, int]:
-    """Adaptively integrate embedding gradients along the baseline-to-input path."""
+    """Adaptively integrate gradients, using ``n_steps`` to seed the initial grid."""
     if n_steps < 2:
         raise ValueError("n_steps must be at least 2")
     if inputs.shape != baselines.shape:
@@ -30,7 +30,7 @@ def integrate_gradients(
         raise ValueError("completeness_tolerance must be positive")
 
     delta = inputs - baselines
-    segments = max(1, n_steps // 2)
+    segments = max(1, n_steps // 8)
     evaluations = 0
 
     def gradient_at_alpha(alpha: float) -> Any:
