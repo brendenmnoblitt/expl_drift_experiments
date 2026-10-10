@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import csv
 import hashlib
 import io
@@ -36,6 +37,9 @@ CANDIDATES = [
 INSTRUCTIONS = "Which candidate best describes this YouTube comment?"
 SEED = 42
 MAX_TOKENS = 128
+MAX_BATCH_SAMPLES = 32
+WARNING_STD = 2.5
+CRITICAL_STD = 3.5
 WINDOW_CLASS_COUNTS = [
     {0: 2, 1: 2},
     {0: 2, 1: 2},
@@ -45,6 +49,30 @@ WINDOW_CLASS_COUNTS = [
     {0: 0, 1: 4},
 ]
 CALIBRATION_WINDOWS = 2
+CALIBRATED_WINDOW_CLASS_COUNTS = [
+    {0: 50, 1: 50},
+    {0: 50, 1: 50},
+    {0: 50, 1: 50},
+    {0: 50, 1: 50},
+    {0: 50, 1: 50},
+    {0: 40, 1: 60},
+    {0: 30, 1: 70},
+    {0: 20, 1: 80},
+    {0: 10, 1: 90},
+    {0: 0, 1: 100},
+]
+EXPERIMENT_PROFILES = {
+    "pilot": {
+        "run_id": "laya-youtube-spam-seed-42",
+        "window_class_counts": WINDOW_CLASS_COUNTS,
+        "calibration_windows": CALIBRATION_WINDOWS,
+    },
+    "calibrated": {
+        "run_id": "laya-youtube-spam-calibrated-seed-42",
+        "window_class_counts": CALIBRATED_WINDOW_CLASS_COUNTS,
+        "calibration_windows": 4,
+    },
+}
 
 
 def _git_revision(repository: Path) -> str:
@@ -87,18 +115,26 @@ def _load_dataset() -> tuple[bytes, list[dict[str, Any]]]:
     return archive, records
 
 
-def _create_windows(records: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+def _create_windows(
+    records: list[dict[str, Any]],
+    class_counts: list[dict[int, int]] | None = None,
+) -> list[list[dict[str, Any]]]:
     rng = random.Random(SEED)
     by_label = {label: [row for row in records if row["label"] == label] for label in (0, 1)}
     for pool in by_label.values():
         rng.shuffle(pool)
     offsets = {0: 0, 1: 0}
     windows = []
-    for counts in WINDOW_CLASS_COUNTS:
+    for window_index, counts in enumerate(class_counts or WINDOW_CLASS_COUNTS):
         window = []
         for label in (0, 1):
             start = offsets[label]
             stop = start + counts[label]
+            if stop > len(by_label[label]):
+                raise ValueError(
+                    f"window {window_index} requests {stop} samples of label {label}; "
+                    f"dataset contains {len(by_label[label])}"
+                )
             window.extend(by_label[label][start:stop])
             offsets[label] = stop
         rng.shuffle(window)
@@ -106,14 +142,27 @@ def _create_windows(records: list[dict[str, Any]]) -> list[list[dict[str, Any]]]
     return windows
 
 
+def _window_chunks(samples: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    return [
+        samples[start : start + MAX_BATCH_SAMPLES]
+        for start in range(0, len(samples), MAX_BATCH_SAMPLES)
+    ]
+
+
 def _request_for_window(
-    run_id: str, window_index: int, samples: list[dict[str, Any]]
+    run_id: str,
+    window_index: int,
+    samples: list[dict[str, Any]],
+    *,
+    chunk_index: int = 0,
+    chunk_count: int = 1,
 ) -> dict[str, Any]:
     endpoint_samples = [{"sample_id": row["sample_id"], "text": row["text"]} for row in samples]
     corpus_fingerprint = sha256_json(endpoint_samples)
+    chunk_tag = f"-b{chunk_index}" if chunk_count > 1 else ""
     return {
         "schema_version": "1",
-        "request_id": f"{run_id}-w{window_index}-{corpus_fingerprint[:12]}",
+        "request_id": f"{run_id}-w{window_index}{chunk_tag}-{corpus_fingerprint[:12]}",
         "run_id": run_id,
         "window_index": window_index,
         "corpus_sha256": corpus_fingerprint,
@@ -145,7 +194,12 @@ def _atomic_write_csv(path: Path, records: list[dict[str, Any]]) -> None:
     os.replace(temporary, path)
 
 
-def run(output_dir: Path) -> dict[str, Any]:
+def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
+    try:
+        profile_config = EXPERIMENT_PROFILES[profile]
+    except KeyError as error:
+        raise ValueError(f"unknown experiment profile {profile!r}") from error
+
     endpoint_url = os.environ["LAYA_ENDPOINT_URL"]
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
     if not token:
@@ -160,9 +214,11 @@ def run(output_dir: Path) -> dict[str, Any]:
     from expl_drift import DriftDetector, DriftMonitor
     from expl_drift.drift.summarize import summarize_attributions
 
-    run_id = "laya-youtube-spam-seed-42"
+    run_id = profile_config["run_id"]
+    window_class_counts = profile_config["window_class_counts"]
+    calibration_windows = profile_config["calibration_windows"]
     archive, records = _load_dataset()
-    windows = _create_windows(records)
+    windows = _create_windows(records, window_class_counts)
     dataset_fingerprint = hashlib.sha256(archive).hexdigest()
     provenance = {
         "schema_version": 1,
@@ -185,12 +241,15 @@ def run(output_dir: Path) -> dict[str, Any]:
             "expl_drift": _git_revision(core_repository),
         },
         "experiment": {
+            "profile": profile,
             "seed": SEED,
             "windows": len(windows),
-            "samples_per_window": 4,
-            "calibration_windows": CALIBRATION_WINDOWS,
+            "samples_per_window": len(windows[0]),
+            "calibration_windows": calibration_windows,
+            "warning_std": WARNING_STD,
+            "critical_std": CRITICAL_STD,
             "window_class_counts": [
-                {"ham": counts[0], "spam": counts[1]} for counts in WINDOW_CLASS_COUNTS
+                {"ham": counts[0], "spam": counts[1]} for counts in window_class_counts
             ],
             "max_tokens": MAX_TOKENS,
             "attribution": "integrated_gradients target=spam candidate_logit n_steps=64",
@@ -218,44 +277,66 @@ def run(output_dir: Path) -> dict[str, Any]:
     if health.get("model") != MODEL:
         raise RuntimeError("endpoint health reports a different model revision")
     if "integrated_gradients" not in health.get("capabilities", []):
-        raise RuntimeError("endpoint health does not advertise qualified integrated_gradients")
+        raise RuntimeError("endpoint health does not advertise integrated_gradients")
 
     responses = []
     cache_dir = output_dir / "windows"
     for window_index, samples in enumerate(windows):
-        request = _request_for_window(run_id, window_index, samples)
-        request_digest = sha256_json(request)
-        cache_path = cache_dir / f"window-{window_index:02d}.json"
-        expected_labels = {row["sample_id"]: row["label"] for row in samples}
-        if cache_path.exists():
-            cached_entry = json.loads(cache_path.read_text(encoding="utf-8"))
-            if cached_entry.get("labels") != expected_labels:
-                raise ValueError(f"cached labels differ for window {window_index}")
-        response = load_cached_response(cache_path, request)
-        if response is None:
-            print(
-                f"Requesting window {window_index + 1}/{len(windows)}: {request['request_id']}",
-                flush=True,
+        chunks = _window_chunks(samples)
+        window_samples = []
+        for chunk_index, chunk in enumerate(chunks):
+            request = _request_for_window(
+                run_id,
+                window_index,
+                chunk,
+                chunk_index=chunk_index,
+                chunk_count=len(chunks),
             )
-            try:
-                response = client.extract(request)
-            except Exception as error:
-                raise RuntimeError(
-                    f"endpoint extraction failed for window {window_index} "
-                    f"({request['request_id']})"
-                ) from error
-            atomic_write_json(
-                cache_path,
-                {
-                    "request_sha256": request_digest,
-                    "labels": expected_labels,
-                    "response": response,
-                },
+            cache_path = (
+                cache_dir / f"window-{window_index:02d}.json"
+                if len(chunks) == 1
+                else cache_dir / f"window-{window_index:02d}-chunk-{chunk_index:02d}.json"
             )
-            print(f"Validated and cached window {window_index + 1}/{len(windows)}", flush=True)
-        else:
-            print(f"Reusing validated window {window_index + 1}/{len(windows)}", flush=True)
-        responses.append(response)
+            expected_labels = {row["sample_id"]: row["label"] for row in chunk}
+            if cache_path.exists():
+                cached_entry = json.loads(cache_path.read_text(encoding="utf-8"))
+                if cached_entry.get("labels") != expected_labels:
+                    raise ValueError(f"cached labels differ for window {window_index}")
+            response = load_cached_response(cache_path, request)
+            if response is None:
+                print(
+                    f"Requesting window {window_index + 1}/{len(windows)} "
+                    f"batch {chunk_index + 1}/{len(chunks)}: {request['request_id']}",
+                    flush=True,
+                )
+                try:
+                    response = client.extract(request)
+                except Exception as error:
+                    raise RuntimeError(
+                        f"endpoint extraction failed for window {window_index} "
+                        f"batch {chunk_index} ({request['request_id']})"
+                    ) from error
+                atomic_write_json(
+                    cache_path,
+                    {
+                        "request_sha256": sha256_json(request),
+                        "labels": expected_labels,
+                        "response": response,
+                    },
+                )
+                print(
+                    f"Validated and cached window {window_index + 1}/{len(windows)} "
+                    f"batch {chunk_index + 1}/{len(chunks)}",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"Reusing validated window {window_index + 1}/{len(windows)} "
+                    f"batch {chunk_index + 1}/{len(chunks)}",
+                    flush=True,
+                )
+            window_samples.extend(response["samples"])
+        responses.append({"samples": window_samples})
 
     raw_attributions = [
         np.asarray([sample["attribution"]["values"] for sample in response["samples"]], dtype=float)
@@ -265,14 +346,22 @@ def run(output_dir: Path) -> dict[str, Any]:
     detector = DriftDetector(summaries[0])
     monitor = DriftMonitor(
         detector,
-        summaries[1 : 1 + CALIBRATION_WINDOWS],
-        warning_std=2.5,
-        critical_std=3.5,
+        summaries[1 : 1 + calibration_windows],
+        warning_std=WARNING_STD,
+        critical_std=CRITICAL_STD,
     )
 
     rows = []
     for window_index, (source, response) in enumerate(zip(windows, responses, strict=True)):
         labels = {row["sample_id"]: row["label"] for row in source}
+        spam_probabilities = [
+            next(
+                score["probability"]
+                for score in sample["scores"]
+                if score["candidate_id"] == "spam"
+            )
+            for sample in response["samples"]
+        ]
         correct = sum(
             int(
                 sample["predicted_candidate_id"]
@@ -282,25 +371,38 @@ def run(output_dir: Path) -> dict[str, Any]:
         )
         row = {
             "window": window_index,
-            "ham": sum(row["label"] == 0 for row in source),
-            "spam": sum(row["label"] == 1 for row in source),
+            "ham": sum(sample["label"] == 0 for sample in source),
+            "spam": sum(sample["label"] == 1 for sample in source),
+            "observed_spam_fraction": sum(sample["label"] == 1 for sample in source) / len(source),
+            "predicted_spam_fraction": sum(
+                sample["predicted_candidate_id"] == "spam" for sample in response["samples"]
+            )
+            / len(source),
+            "mean_spam_probability": float(np.mean(spam_probabilities)),
             "accuracy": correct / len(source),
             "alert_level": "calibration",
         }
-        if window_index > CALIBRATION_WINDOWS:
+        if window_index > calibration_windows:
             evaluation = monitor.evaluate(summaries[window_index])
             row["alert_level"] = evaluation["alert_level"].value
             row.update(evaluation["metrics"])
+            row.update(
+                {f"{metric}_alert": alert.value for metric, alert in evaluation["alerts"].items()}
+            )
         rows.append(row)
 
     result = {
         "provenance": provenance,
         "endpoint_health": health,
+        "monitor_thresholds": monitor.thresholds,
         "window_results": rows,
         "summary": {
             "baseline_accuracy": rows[0]["accuracy"],
             "mean_later_accuracy": float(np.mean([row["accuracy"] for row in rows[1:]])),
-            "first_drift_window": CALIBRATION_WINDOWS + 1,
+            "mean_post_calibration_accuracy": float(
+                np.mean([row["accuracy"] for row in rows[calibration_windows + 1 :]])
+            ),
+            "first_drift_window": calibration_windows + 1,
             "alert_levels": [row["alert_level"] for row in rows],
         },
     }
@@ -310,8 +412,12 @@ def run(output_dir: Path) -> dict[str, Any]:
 
 
 def main() -> None:
-    output = Path(os.environ.get("LAYA_EXPERIMENT_OUTPUT", "results/laya-youtube-spam"))
-    result = run(output)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", choices=sorted(EXPERIMENT_PROFILES), default="pilot")
+    args = parser.parse_args()
+    default_output = f"results/laya-youtube-spam-{args.profile}"
+    output = Path(os.environ.get("LAYA_EXPERIMENT_OUTPUT", default_output))
+    result = run(output, profile=args.profile)
     print(json.dumps(result["summary"], sort_keys=True))
     for row in result["window_results"]:
         print(json.dumps(row, sort_keys=True))
