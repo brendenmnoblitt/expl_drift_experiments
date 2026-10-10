@@ -78,11 +78,14 @@ The host-side runner sends batches to a private Hugging Face Inference Endpoint;
 
 With the endpoint configured to the immutable image digest that advertises both `decision_scores` and `integrated_gradients`, run:
 
+Install the experiment dependencies from this repository's existing `requirements.txt` in the host Python environment; this installs analysis dependencies, not Laya or its model weights.
+
 ```bash
+python -m pip install -r requirements.txt
 export LAYA_ENDPOINT_URL="https://<endpoint-url>"
 export LAYA_ENDPOINT_IMAGE_DIGEST="sha256:<published-image-digest>"
 export HF_TOKEN="<read token for the private endpoint>"
-uv run --project endpoint python -m experiments.laya_endpoint.runner
+python -m experiments.laya_endpoint.runner
 ```
 
 The runner writes `results/laya-youtube-spam/provenance.json`, per-window validated responses, `experiment_results.json`, and `window_results.csv`. Its deterministic six-window class-prior shift is a small end-to-end check, not a direct comparison with the existing BERT/GPT AG News runs. Laya's complete training mix is undisclosed, so dataset non-overlap cannot be certified. Independent parity against Laya's native SDK also remains a qualification gate.
