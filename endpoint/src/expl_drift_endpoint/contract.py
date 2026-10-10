@@ -5,6 +5,8 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+MAX_IG_COMPUTE_STEPS = 8192
+
 Identifier = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")]
 Commit = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 Fingerprint = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -91,7 +93,7 @@ class AttributionSignal(ContractModel):
     target_candidate_id: Identifier
     target_semantics: Literal["candidate_logit"]
     baseline: Literal["pad_document_tokens"]
-    n_steps: int = Field(ge=2, le=4096)
+    n_steps: int = Field(ge=2, le=MAX_IG_COMPUTE_STEPS)
     token_width: int = Field(ge=1, le=8192)
     token_ids: list[int]
     tokens: list[str]

@@ -5,11 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from expl_drift_endpoint.contract import AttributionSignal
+from expl_drift_endpoint.contract import MAX_IG_COMPUTE_STEPS, AttributionSignal
 
 COMPLETENESS_ATOL = 0.01
 COMPLETENESS_RTOL = 0.01
-MAX_IG_COMPUTE_STEPS = 8192
 GAUSS_LEGENDRE_PANEL_ORDER = 16
 
 

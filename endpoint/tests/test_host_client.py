@@ -76,6 +76,13 @@ def response_payload(request_payload):
     }
 
 
+def test_accepts_maximum_adaptive_ig_evaluation_count(request_payload, response_payload):
+    response = copy.deepcopy(response_payload)
+    response["samples"][0]["attribution"]["n_steps"] = 8192
+
+    validate_response(request_payload, response)
+
+
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
@@ -95,6 +102,10 @@ def response_payload(request_payload):
         (
             lambda response: response["samples"][0]["attribution"].update(completeness_delta=0.1),
             "completeness residual",
+        ),
+        (
+            lambda response: response["samples"][0]["attribution"].update(n_steps=8193),
+            "evaluation count",
         ),
     ],
 )

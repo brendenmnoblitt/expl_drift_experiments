@@ -84,6 +84,54 @@ def _git_revision(repository: Path) -> str:
     ).stdout.strip()
 
 
+def _merge_resume_provenance(
+    previous: dict[str, Any],
+    current: dict[str, Any],
+    *,
+    resume_from_image_digest: str | None,
+) -> tuple[dict[str, Any], str | None]:
+    """Track every runtime/code revision used across an explicitly resumed run."""
+    previous_endpoint = previous["endpoint"]
+    current_endpoint = current["endpoint"]
+    previous_image = previous_endpoint["image_digest"]
+    current_image = current_endpoint["image_digest"]
+    image_digests = list(previous_endpoint.get("image_digests", [previous_image]))
+    if current_image not in image_digests:
+        if resume_from_image_digest != previous_image:
+            raise ValueError(
+                "endpoint image changed; set LAYA_RESUME_PREVIOUS_IMAGE_DIGEST "
+                "to the image recorded in the existing provenance to resume"
+            )
+        image_digests.append(current_image)
+
+    def without_execution_revisions(value: dict[str, Any]) -> dict[str, Any]:
+        normalized = json.loads(json.dumps(value))
+        for field in ("image_digest", "image_digests", "legacy_cache_image_digest"):
+            normalized["endpoint"].pop(field, None)
+        for field in ("expl_drift_experiments", "experiment_code_revisions"):
+            normalized["revisions"].pop(field, None)
+        return normalized
+
+    if without_execution_revisions(previous) != without_execution_revisions(current):
+        raise ValueError("output directory provenance differs; choose a fresh output directory")
+
+    previous_revisions = previous["revisions"]
+    current_revisions = current["revisions"]
+    code_revisions = previous_revisions.get(
+        "experiment_code_revisions", [previous_revisions["expl_drift_experiments"]]
+    )
+    code_revisions = list(
+        dict.fromkeys([*code_revisions, *current_revisions["experiment_code_revisions"]])
+    )
+    current_endpoint["image_digests"] = image_digests
+    legacy_cache_image_digest = previous_endpoint.get("legacy_cache_image_digest", previous_image)
+    if len(image_digests) > 1 or "legacy_cache_image_digest" in previous_endpoint:
+        current_endpoint["legacy_cache_image_digest"] = legacy_cache_image_digest
+    current_revisions["expl_drift_experiments"] = code_revisions[0]
+    current_revisions["experiment_code_revisions"] = code_revisions
+    return current, legacy_cache_image_digest
+
+
 def _load_dataset() -> tuple[bytes, list[dict[str, Any]]]:
     with urlopen(DATASET_URL, timeout=60) as response:
         archive = response.read()
@@ -220,6 +268,7 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
     archive, records = _load_dataset()
     windows = _create_windows(records, window_class_counts)
     dataset_fingerprint = hashlib.sha256(archive).hexdigest()
+    experiment_revision = _git_revision(root)
     provenance = {
         "schema_version": 1,
         "run_id": run_id,
@@ -235,9 +284,14 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
         },
         "model": MODEL,
         "tokenizer": MODEL,
-        "endpoint": {"url": endpoint_url, "image_digest": image_digest},
+        "endpoint": {
+            "url": endpoint_url,
+            "image_digest": image_digest,
+            "image_digests": [image_digest],
+        },
         "revisions": {
-            "expl_drift_experiments": _git_revision(root),
+            "expl_drift_experiments": experiment_revision,
+            "experiment_code_revisions": [experiment_revision],
             "expl_drift": _git_revision(core_repository),
         },
         "experiment": {
@@ -265,10 +319,16 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "provenance.json"
+    legacy_cache_image_digest = None
     if manifest_path.exists():
         previous = json.loads(manifest_path.read_text(encoding="utf-8"))
+        provenance, legacy_cache_image_digest = _merge_resume_provenance(
+            previous,
+            provenance,
+            resume_from_image_digest=os.environ.get("LAYA_RESUME_PREVIOUS_IMAGE_DIGEST"),
+        )
         if previous != provenance:
-            raise ValueError("output directory provenance differs; choose a fresh output directory")
+            atomic_write_json(manifest_path, provenance)
     else:
         atomic_write_json(manifest_path, provenance)
 
@@ -281,6 +341,7 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
 
     responses = []
     cache_dir = output_dir / "windows"
+    cache_image_digests = set()
     for window_index, samples in enumerate(windows):
         chunks = _window_chunks(samples)
         window_samples = []
@@ -298,10 +359,21 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
                 else cache_dir / f"window-{window_index:02d}-chunk-{chunk_index:02d}.json"
             )
             expected_labels = {row["sample_id"]: row["label"] for row in chunk}
+            cache_image_digest = image_digest
             if cache_path.exists():
                 cached_entry = json.loads(cache_path.read_text(encoding="utf-8"))
                 if cached_entry.get("labels") != expected_labels:
                     raise ValueError(f"cached labels differ for window {window_index}")
+                cache_image_digest = cached_entry.get("endpoint_image_digest")
+                if cache_image_digest is None:
+                    cache_image_digest = legacy_cache_image_digest
+                    if cache_image_digest is None:
+                        raise ValueError(f"cache {cache_path} has no endpoint image provenance")
+                    cached_entry["endpoint_image_digest"] = cache_image_digest
+                    atomic_write_json(cache_path, cached_entry)
+                if cache_image_digest not in provenance["endpoint"]["image_digests"]:
+                    raise ValueError(f"cache {cache_path} references an unrecorded endpoint image")
+                cache_image_digests.add(cache_image_digest)
             response = load_cached_response(cache_path, request)
             if response is None:
                 print(
@@ -316,11 +388,13 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
                         f"endpoint extraction failed for window {window_index} "
                         f"batch {chunk_index} ({request['request_id']})"
                     ) from error
+                cache_image_digests.add(image_digest)
                 atomic_write_json(
                     cache_path,
                     {
                         "request_sha256": sha256_json(request),
                         "labels": expected_labels,
+                        "endpoint_image_digest": image_digest,
                         "response": response,
                     },
                 )
@@ -394,6 +468,7 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
     result = {
         "provenance": provenance,
         "endpoint_health": health,
+        "endpoint_image_digests_used": sorted(cache_image_digests),
         "monitor_thresholds": monitor.thresholds,
         "window_results": rows,
         "summary": {

@@ -94,7 +94,7 @@ include candidate-targeted Integrated Gradients with `candidate_logit`
 semantics. IG requests default to 64. Adaptive composite Gauss-Legendre
 integration estimates local error with 8- and 16-point rules, then bisects the
 highest-error interval until the hard completeness gate passes or 8192 evaluations.
-Response `n_steps` records total gradient evaluations.
+The response's `n_steps` field records total gradient evaluations and allows the full 8192-evaluation integration cap.
 IG is rejected unless completeness residual is at most
 `0.01 + 0.01 * abs(logit_delta)`. Token alignment, finite values, and truncation
 counts are validated in the response. Health capability advertisement indicates

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import sys
 from importlib import import_module
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import pytest
+
 runner = import_module("experiments.laya_endpoint.runner")
 
 
@@ -42,3 +41,60 @@ def test_endpoint_chunks_stay_within_contract_limit_and_cover_samples_once():
 
     assert [len(chunk) for chunk in chunks] == [32, 32, 32, 4]
     assert [sample for chunk in chunks for sample in chunk] == samples
+
+
+def test_resume_provenance_tracks_image_and_runner_revisions():
+    old_image = "sha256:" + "a" * 64
+    new_image = "sha256:" + "b" * 64
+    previous = {
+        "dataset": {"archive_sha256": "d" * 64},
+        "endpoint": {"url": "https://endpoint", "image_digest": old_image},
+        "experiment": {"profile": "calibrated"},
+        "revisions": {
+            "expl_drift": "e" * 40,
+            "expl_drift_experiments": "f" * 40,
+        },
+    }
+    current = {
+        "dataset": {"archive_sha256": "d" * 64},
+        "endpoint": {"url": "https://endpoint", "image_digest": new_image},
+        "experiment": {"profile": "calibrated"},
+        "revisions": {
+            "expl_drift": "e" * 40,
+            "expl_drift_experiments": "1" * 40,
+            "experiment_code_revisions": ["1" * 40],
+        },
+    }
+
+    merged, legacy_image = runner._merge_resume_provenance(
+        previous, current, resume_from_image_digest=old_image
+    )
+
+    assert merged["endpoint"]["image_digests"] == [old_image, new_image]
+    assert merged["endpoint"]["legacy_cache_image_digest"] == old_image
+    assert legacy_image == old_image
+    assert merged["revisions"]["experiment_code_revisions"] == ["f" * 40, "1" * 40]
+
+
+def test_resume_provenance_requires_explicit_previous_image():
+    old_image = "sha256:" + "a" * 64
+    current_image = "sha256:" + "b" * 64
+    previous = {
+        "dataset": {},
+        "endpoint": {"url": "https://endpoint", "image_digest": old_image},
+        "experiment": {},
+        "revisions": {"expl_drift": "e" * 40, "expl_drift_experiments": "f" * 40},
+    }
+    current = {
+        "dataset": {},
+        "endpoint": {"url": "https://endpoint", "image_digest": current_image},
+        "experiment": {},
+        "revisions": {
+            "expl_drift": "e" * 40,
+            "expl_drift_experiments": "1" * 40,
+            "experiment_code_revisions": ["1" * 40],
+        },
+    }
+
+    with pytest.raises(ValueError, match="LAYA_RESUME_PREVIOUS_IMAGE_DIGEST"):
+        runner._merge_resume_provenance(previous, current, resume_from_image_digest=None)

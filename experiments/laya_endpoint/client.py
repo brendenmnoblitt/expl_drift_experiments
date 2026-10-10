@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 
 COMPLETENESS_ATOL = 0.01
 COMPLETENESS_RTOL = 0.01
+MAX_IG_COMPUTE_STEPS = 8192
 
 
 def canonical_json(value: Any) -> bytes:
@@ -77,6 +78,14 @@ def validate_response(request: dict[str, Any], response: dict[str, Any]) -> None
             or attribution.get("target_semantics") != "candidate_logit"
         ):
             raise ValueError(f"endpoint attribution target differs for {sample_id}")
+
+        n_steps = attribution.get("n_steps")
+        if (
+            not isinstance(n_steps, int)
+            or isinstance(n_steps, bool)
+            or not 2 <= n_steps <= MAX_IG_COMPUTE_STEPS
+        ):
+            raise ValueError(f"endpoint IG evaluation count is invalid for {sample_id}")
 
         width = attribution.get("token_width")
         aligned = ("token_ids", "tokens", "segments", "values")
