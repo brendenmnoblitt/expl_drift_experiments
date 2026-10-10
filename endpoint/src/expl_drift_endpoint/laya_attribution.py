@@ -12,7 +12,7 @@ from expl_drift_endpoint.contract import AttributionSignal
 
 COMPLETENESS_ATOL = 0.01
 COMPLETENESS_RTOL = 0.01
-MAX_IG_COMPUTE_STEPS = 256
+MAX_IG_COMPUTE_STEPS = 1024
 
 
 @lru_cache(maxsize=16)

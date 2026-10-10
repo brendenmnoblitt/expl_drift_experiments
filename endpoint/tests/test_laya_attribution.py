@@ -104,7 +104,7 @@ def test_attribution_contract_requires_aligned_fixed_width_arrays():
         "target_candidate_id": "alpha",
         "target_semantics": "candidate_logit",
         "baseline": "pad_document_tokens",
-        "n_steps": 256,
+        "n_steps": 1024,
         "token_width": 3,
         "token_ids": [1, 2, 3],
         "tokens": ["[CLS]", "word", "[SEP]"],
@@ -117,11 +117,11 @@ def test_attribution_contract_requires_aligned_fixed_width_arrays():
         "completeness_delta": 0.01,
     }
     assert AttributionSignal.model_validate(payload).token_width == 3
-    payload["n_steps"] = 257
-    with pytest.raises(ValidationError, match="less than or equal to 256"):
+    payload["n_steps"] = 1025
+    with pytest.raises(ValidationError, match="less than or equal to 1024"):
         AttributionSignal.model_validate(payload)
 
-    payload["n_steps"] = 256
+    payload["n_steps"] = 1024
 
     payload["values"] = [0.0, 0.5]
     with pytest.raises(ValidationError, match="must match token_width"):
