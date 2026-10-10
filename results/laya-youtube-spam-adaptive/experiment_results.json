@@ -1,0 +1,149 @@
+{
+  "endpoint_health": {
+    "capabilities": [
+      "decision_scores",
+      "integrated_gradients"
+    ],
+    "extraction_available": true,
+    "model": {
+      "repository": "convaiinnovations/laya",
+      "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148"
+    },
+    "reason": null,
+    "schema_version": "1",
+    "status": "ready"
+  },
+  "provenance": {
+    "dataset": {
+      "archive_sha256": "bd6182891adb3cfc8334b82c062176dfbebc563bf0ba07e31c2645f916865a0a",
+      "citation": "Alberto & Lochter (2015), UCI DOI 10.24432/C58885",
+      "license": "CC BY 4.0",
+      "name": "UCI YouTube Spam Collection",
+      "published_laya_benchmarks_overlap": "not listed in the pinned model card",
+      "records": 1956,
+      "training_mix_overlap": "not verifiable; Laya's full training mix is undisclosed",
+      "url": "https://archive.ics.uci.edu/static/public/380/youtube+spam+collection.zip"
+    },
+    "endpoint": {
+      "image_digest": "sha256:0ae8048118177879fa0cd228e4957214ca6459103bfbd9f00b9524db86501954",
+      "url": "https://6ac8d99f53d27c9b5cb0cebc.endpoints.huggingface.cloud"
+    },
+    "experiment": {
+      "attribution": "integrated_gradients target=spam candidate_logit n_steps=64",
+      "bert_gpt_comparison": "Existing BERT/GPT runs use AG News and different labels; results are context, not a direct baseline for this corpus.",
+      "calibration_windows": 2,
+      "drift_injection": "synthetic class-prior shift by deterministic sampling without replacement",
+      "drift_method": "DriftDetector + DriftMonitor + summarize_attributions",
+      "max_tokens": 128,
+      "samples_per_window": 4,
+      "seed": 42,
+      "window_class_counts": [
+        {
+          "ham": 2,
+          "spam": 2
+        },
+        {
+          "ham": 2,
+          "spam": 2
+        },
+        {
+          "ham": 2,
+          "spam": 2
+        },
+        {
+          "ham": 1,
+          "spam": 3
+        },
+        {
+          "ham": 0,
+          "spam": 4
+        },
+        {
+          "ham": 0,
+          "spam": 4
+        }
+      ],
+      "windows": 6
+    },
+    "model": {
+      "repository": "convaiinnovations/laya",
+      "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148"
+    },
+    "revisions": {
+      "expl_drift": "4c8467481cf436e29b0097a33a1050a70e631dd5",
+      "expl_drift_experiments": "305a0521eb06a2e86d7012ae4a4d9db678107af8"
+    },
+    "run_id": "laya-youtube-spam-seed-42",
+    "schema_version": 1,
+    "tokenizer": {
+      "repository": "convaiinnovations/laya",
+      "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148"
+    }
+  },
+  "summary": {
+    "alert_levels": [
+      "calibration",
+      "calibration",
+      "calibration",
+      "ok",
+      "ok",
+      "ok"
+    ],
+    "baseline_accuracy": 1.0,
+    "first_drift_window": 3,
+    "mean_later_accuracy": 0.7
+  },
+  "window_results": [
+    {
+      "accuracy": 1.0,
+      "alert_level": "calibration",
+      "ham": 2,
+      "spam": 2,
+      "window": 0
+    },
+    {
+      "accuracy": 1.0,
+      "alert_level": "calibration",
+      "ham": 2,
+      "spam": 2,
+      "window": 1
+    },
+    {
+      "accuracy": 0.5,
+      "alert_level": "calibration",
+      "ham": 2,
+      "spam": 2,
+      "window": 2
+    },
+    {
+      "accuracy": 0.75,
+      "alert_level": "ok",
+      "cosine_drift": 0.00019338369741239703,
+      "ham": 1,
+      "max_jsd": 0.6931471784980763,
+      "max_wasserstein": 11.0,
+      "spam": 3,
+      "window": 3
+    },
+    {
+      "accuracy": 0.75,
+      "alert_level": "ok",
+      "cosine_drift": 9.997855802068578e-05,
+      "ham": 0,
+      "max_jsd": 0.693147177949416,
+      "max_wasserstein": 9.75,
+      "spam": 4,
+      "window": 4
+    },
+    {
+      "accuracy": 0.5,
+      "alert_level": "ok",
+      "cosine_drift": 0.0004952078808045934,
+      "ham": 0,
+      "max_jsd": 0.693147178223746,
+      "max_wasserstein": 9.75,
+      "spam": 4,
+      "window": 5
+    }
+  ]
+}
