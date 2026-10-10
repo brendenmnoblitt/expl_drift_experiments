@@ -9,6 +9,7 @@ description = "Remote classifier extraction service for expl_drift experiments"
 requires-python = ">=3.12,<3.14"
 dependencies = [
   "fastapi==0.115.12",
+  "numpy==2.5.3",
   "pydantic==2.11.7",
   "uvicorn==0.34.3",
 ]
@@ -17,7 +18,7 @@ dependencies = [
 model = ["laya==0.3.29"]
 
 [dependency-groups]
-dev = ["httpx==0.28.1", "numpy==2.5.3", "pytest==9.0.2", "ruff==0.12.9"]
+dev = ["httpx==0.28.1", "pytest==9.0.2", "ruff==0.12.9"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/expl_drift_endpoint"]

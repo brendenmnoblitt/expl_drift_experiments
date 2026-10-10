@@ -61,22 +61,22 @@ def test_integrated_gradients_integrates_quadratic_score():
     np.testing.assert_allclose(attributions, inputs**2)
 
 
-def test_integrated_gradients_adaptively_integrates_cubic_gradient():
-    inputs = np.array([[1.5]])
+def test_integrated_gradients_integrates_high_degree_path_globally():
+    inputs = np.ones((1, 1))
     baseline = np.zeros_like(inputs)
 
-    attributions, _ = integrate_gradients(
+    attributions, steps = integrate_gradients(
         inputs,
         baseline,
-        lambda point: 4.0 * point**3,
+        lambda point: point**127,
         n_steps=64,
-        completeness_tolerance=1e-10,
     )
 
-    np.testing.assert_allclose(attributions, inputs**4, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(attributions, [[1.0 / 128.0]], rtol=1e-12, atol=1e-14)
+    assert steps == 64
 
 
-def test_integrated_gradients_adaptively_integrates_smooth_path():
+def test_integrated_gradients_integrates_smooth_path():
     inputs = np.array([[1.0]])
     baseline = np.zeros_like(inputs)
 
@@ -85,10 +85,9 @@ def test_integrated_gradients_adaptively_integrates_smooth_path():
         baseline,
         np.exp,
         n_steps=64,
-        completeness_tolerance=1e-8,
     )
 
-    np.testing.assert_allclose(attributions, np.expm1(inputs), rtol=1e-7, atol=1e-7)
+    np.testing.assert_allclose(attributions, np.expm1(inputs), rtol=1e-12, atol=1e-12)
     assert 2 <= steps <= MAX_IG_COMPUTE_STEPS
 
 

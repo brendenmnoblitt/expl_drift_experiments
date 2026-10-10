@@ -9,7 +9,6 @@ from expl_drift_endpoint.contract import AttributionSignal
 
 COMPLETENESS_ATOL = 0.01
 COMPLETENESS_RTOL = 0.01
-INITIAL_IG_QUADRATURE_TOLERANCE = 0.1
 MAX_IG_COMPUTE_STEPS = 4096
 
 
@@ -19,81 +18,35 @@ def integrate_gradients(
     gradient_at: Callable[[Any], Any],
     n_steps: int,
     *,
-    completeness_tolerance: float = 1e-6,
     max_steps: int = MAX_IG_COMPUTE_STEPS,
 ) -> tuple[Any, int]:
-    """Refine nested composite-Simpson estimates within a gradient-evaluation cap."""
+    """Integrate gradients with a global Gauss-Legendre rule."""
+    import numpy as np
+
     if n_steps < 2:
         raise ValueError("n_steps must be at least 2")
     if inputs.shape != baselines.shape:
         raise ValueError("inputs and baselines must have the same shape")
-    if completeness_tolerance <= 0:
-        raise ValueError("completeness_tolerance must be positive")
     if max_steps < 2:
         raise ValueError("max_steps must allow at least two gradient evaluations")
 
     delta = inputs - baselines
+    steps = min(n_steps, max_steps)
+    nodes, weights = np.polynomial.legendre.leggauss(steps)
+    integrated_gradient = None
     evaluations = 0
-
-    def gradient_at_alpha(alpha: float) -> Any:
-        nonlocal evaluations
+    for node, weight in zip(nodes, weights, strict=True):
+        alpha = float((node + 1.0) / 2.0)
         gradient = gradient_at(baselines + delta * alpha)
         if gradient.shape != inputs.shape:
             raise ValueError("gradient_at must return a gradient with the input shape")
+        contribution = gradient * float(weight / 2.0)
+        integrated_gradient = (
+            contribution if integrated_gradient is None else integrated_gradient + contribution
+        )
         evaluations += 1
-        return gradient
 
-    def projection(integrated_gradient: Any) -> float:
-        value = (delta * integrated_gradient).sum()
-        if hasattr(value, "detach"):
-            value = value.detach().float().cpu().item()
-        return float(value)
-
-    left_value = gradient_at_alpha(0.0)
-    right_value = gradient_at_alpha(1.0)
-    trapezoid = (left_value + right_value) / 2.0
-    seed_panels = max(2, n_steps // 8)
-    previous_simpson = None
-    panels = 1
-    estimate = trapezoid
-
-    while panels < seed_panels and evaluations + panels <= max_steps:
-        midpoint_sum = None
-        for index in range(panels):
-            value = gradient_at_alpha((index + 0.5) / panels)
-            if midpoint_sum is None:
-                midpoint_sum = value.clone() if hasattr(value, "clone") else value.copy()
-            else:
-                midpoint_sum += value
-        previous_trapezoid = trapezoid
-        trapezoid = trapezoid / 2.0 + midpoint_sum / (2.0 * panels)
-        panels *= 2
-        estimate = (4.0 * trapezoid - previous_trapezoid) / 3.0
-        previous_simpson = estimate
-
-    while evaluations + panels <= max_steps:
-        midpoint_sum = None
-        for index in range(panels):
-            value = gradient_at_alpha((index + 0.5) / panels)
-            if midpoint_sum is None:
-                midpoint_sum = value.clone() if hasattr(value, "clone") else value.copy()
-            else:
-                midpoint_sum += value
-
-        refined_trapezoid = trapezoid / 2.0 + midpoint_sum / (2.0 * panels)
-        panels *= 2
-        simpson_estimate = (4.0 * refined_trapezoid - trapezoid) / 3.0
-        if (
-            previous_simpson is not None
-            and abs(projection(simpson_estimate - previous_simpson) / 15.0)
-            <= completeness_tolerance
-        ):
-            return delta * simpson_estimate, evaluations
-        previous_simpson = simpson_estimate
-        trapezoid = refined_trapezoid
-        estimate = simpson_estimate
-
-    return delta * estimate, evaluations
+    return delta * integrated_gradient, evaluations
 
 
 def _completeness_tolerance(logit_delta: float) -> float:
@@ -239,19 +192,19 @@ def explain_choice(
             return torch.autograd.grad(score, point, retain_graph=False)[0].detach()
 
     logit_delta = input_logit_value - baseline_logit_value
-    quadrature_tolerance = max(
-        INITIAL_IG_QUADRATURE_TOLERANCE,
-        _completeness_tolerance(logit_delta),
-    )
     integration_steps = 0
+    quadrature_steps = n_steps
+    completeness_delta = float("inf")
     while True:
+        remaining_steps = MAX_IG_COMPUTE_STEPS - integration_steps
+        if quadrature_steps > remaining_steps:
+            _validate_completeness(completeness_delta, logit_delta)
         token_attributions, attempt_steps = integrate_gradients(
             input_embeds,
             baseline_embeds,
             gradient_at,
-            n_steps,
-            completeness_tolerance=quadrature_tolerance,
-            max_steps=MAX_IG_COMPUTE_STEPS - integration_steps,
+            quadrature_steps,
+            max_steps=quadrature_steps,
         )
         integration_steps += attempt_steps
         if not torch.isfinite(token_attributions).all():
@@ -261,10 +214,7 @@ def explain_choice(
         completeness_delta = logit_delta - sum(state_values)
         if abs(completeness_delta) <= _completeness_tolerance(logit_delta):
             break
-        if MAX_IG_COMPUTE_STEPS - integration_steps < 2:
-            _validate_completeness(completeness_delta, logit_delta)
-        quadrature_tolerance /= 2.0
-
+        quadrature_steps *= 2
     sequence_ids = list(item["ids"])
     sequence_tokens = agent.tok.convert_ids_to_tokens(sequence_ids)
     sequence_segments = ["instruction"] * len(sequence_ids)
