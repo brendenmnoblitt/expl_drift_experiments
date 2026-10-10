@@ -9,6 +9,7 @@ from expl_drift_endpoint.contract import AttributionSignal
 
 COMPLETENESS_ATOL = 0.01
 COMPLETENESS_RTOL = 0.01
+INITIAL_IG_QUADRATURE_TOLERANCE = 0.1
 MAX_IG_COMPUTE_STEPS = 4096
 
 
@@ -258,7 +259,10 @@ def explain_choice(
             return torch.autograd.grad(score, point, retain_graph=False)[0].detach()
 
     logit_delta = input_logit_value - baseline_logit_value
-    quadrature_tolerance = _completeness_tolerance(logit_delta)
+    quadrature_tolerance = max(
+        INITIAL_IG_QUADRATURE_TOLERANCE,
+        _completeness_tolerance(logit_delta),
+    )
     integration_steps = 0
     while True:
         token_attributions, attempt_steps = integrate_gradients(

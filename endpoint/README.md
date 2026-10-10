@@ -106,8 +106,9 @@ open. The score path directly calls SDK `predict_batch`; IG uses the pinned SDK'
 private sequence builder/collator and substitutes input embeddings beneath the
 no-grad inference wrapper, retaining Laya's decision head. IG disables autocast
 so forward logits and gradients use the same precision path. Adaptive Simpson
-integration refines locally and enforces a 1% relative / 0.01-logit absolute
-completeness tolerance, with a 4096-evaluation cap. Retest before changing the
+starts with a 0.1 logit-space quadrature estimate budget and retries more tightly
+if the measured completeness residual fails the 1% relative / 0.01-logit
+absolute gate. The hard evaluation cap remains 4096; retest before changing the
 pinned Laya SDK version.
 
 ### Implementation check on October 7 2026
