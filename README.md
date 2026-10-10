@@ -72,6 +72,21 @@ Archived CUSUM/EWMA lead-time experiments are retained only as offline reference
   - `results/runs/stats_20260223_152707/figures/seed_case_studies/case_study_seed_selection.csv`
 - Do not replace case-study seeds manually after viewing figures; selection must remain tied to the recorded CSV.
 
+## Remote Laya Experiment
+
+The host-side runner sends batches to a private Hugging Face Inference Endpoint; it does not load Laya locally. It pins the base model revision and UCI YouTube Spam Collection archive checksum, validates every response before caching, and resumes only when cached request fingerprints match.
+
+With the endpoint configured to the immutable image digest that advertises both `decision_scores` and `integrated_gradients`, run:
+
+```bash
+export LAYA_ENDPOINT_URL="https://<endpoint-url>"
+export LAYA_ENDPOINT_IMAGE_DIGEST="sha256:<published-image-digest>"
+export HF_TOKEN="<read token for the private endpoint>"
+uv run --project endpoint python -m experiments.laya_endpoint.runner
+```
+
+The runner writes `results/laya-youtube-spam/provenance.json`, per-window validated responses, `experiment_results.json`, and `window_results.csv`. Its deterministic six-window class-prior shift is a small end-to-end check, not a direct comparison with the existing BERT/GPT AG News runs. Laya's complete training mix is undisclosed, so dataset non-overlap cannot be certified. Independent parity against Laya's native SDK also remains a qualification gate.
+
 ## Citation
 
 - License: `LICENSE`
