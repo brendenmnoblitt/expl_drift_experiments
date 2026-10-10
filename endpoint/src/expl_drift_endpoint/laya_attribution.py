@@ -17,28 +17,102 @@ def integrate_gradients(
     baselines: Any,
     gradient_at: Callable[[Any], Any],
     n_steps: int,
-) -> Any:
-    """Trapezoidal Integrated Gradients for matching arrays or tensors."""
+    *,
+    completeness_tolerance: float = 1e-6,
+    max_steps: int = MAX_IG_COMPUTE_STEPS,
+) -> tuple[Any, int]:
+    """Adaptively integrate embedding gradients along the baseline-to-input path."""
     if n_steps < 2:
         raise ValueError("n_steps must be at least 2")
     if inputs.shape != baselines.shape:
         raise ValueError("inputs and baselines must have the same shape")
+    if completeness_tolerance <= 0:
+        raise ValueError("completeness_tolerance must be positive")
 
     delta = inputs - baselines
-    interval_count = n_steps - 1
-    gradient_sum: Any = None
-    for index in range(n_steps):
-        alpha = index / interval_count
-        point = baselines + delta * alpha
-        gradient = gradient_at(point)
+    segments = max(1, n_steps // 2)
+    evaluations = 0
+
+    def gradient_at_alpha(alpha: float) -> Any:
+        nonlocal evaluations
+        if evaluations >= max_steps:
+            raise RuntimeError(
+                f"Adaptive Integrated Gradients exceeded {max_steps} gradient evaluations"
+            )
+        gradient = gradient_at(baselines + delta * alpha)
         if gradient.shape != inputs.shape:
             raise ValueError("gradient_at must return a gradient with the input shape")
-        weight = 0.5 if index in (0, interval_count) else 1.0
-        weighted_gradient = gradient * weight
-        gradient_sum = (
-            weighted_gradient if gradient_sum is None else gradient_sum + weighted_gradient
+        evaluations += 1
+        return gradient
+
+    def simpson(left, right, left_value, middle_value, right_value):
+        return (right - left) * (left_value + 4.0 * middle_value + right_value) / 6.0
+
+    def projection(integrated_gradient):
+        value = (delta * integrated_gradient).sum()
+        if hasattr(value, "detach"):
+            value = value.detach().float().cpu().item()
+        return float(value)
+
+    def refine(left, middle, right, left_value, middle_value, right_value, coarse, tolerance):
+        left_middle = (left + middle) / 2.0
+        right_middle = (middle + right) / 2.0
+        left_middle_value = gradient_at_alpha(left_middle)
+        right_middle_value = gradient_at_alpha(right_middle)
+        left_integral = simpson(left, middle, left_value, left_middle_value, middle_value)
+        right_integral = simpson(middle, right, middle_value, right_middle_value, right_value)
+        refined = left_integral + right_integral
+        correction = (refined - coarse) / 15.0
+        if abs(projection(correction)) <= tolerance:
+            return refined + correction
+        return refine(
+            left,
+            left_middle,
+            middle,
+            left_value,
+            left_middle_value,
+            middle_value,
+            left_integral,
+            tolerance / 2.0,
+        ) + refine(
+            middle,
+            right_middle,
+            right,
+            middle_value,
+            right_middle_value,
+            right_value,
+            right_integral,
+            tolerance / 2.0,
         )
-    return delta * (gradient_sum / interval_count)
+
+    integrated_gradient = None
+    interval_tolerance = completeness_tolerance / (2.0 * segments)
+    left = 0.0
+    left_value = gradient_at_alpha(left)
+    for segment in range(segments):
+        right = (segment + 1) / segments
+        middle = (left + right) / 2.0
+        middle_value = gradient_at_alpha(middle)
+        right_value = gradient_at_alpha(right)
+        coarse = simpson(left, right, left_value, middle_value, right_value)
+        segment_integral = refine(
+            left,
+            middle,
+            right,
+            left_value,
+            middle_value,
+            right_value,
+            coarse,
+            interval_tolerance,
+        )
+        integrated_gradient = (
+            segment_integral
+            if integrated_gradient is None
+            else integrated_gradient + segment_integral
+        )
+        left = right
+        left_value = right_value
+    return delta * integrated_gradient, evaluations
 
 
 def _completeness_tolerance(logit_delta: float) -> float:
@@ -184,24 +258,20 @@ def explain_choice(
             return torch.autograd.grad(score, point, retain_graph=False)[0].detach()
 
     logit_delta = input_logit_value - baseline_logit_value
-    integration_steps = n_steps
-    while True:
-        token_attributions = integrate_gradients(
-            input_embeds,
-            baseline_embeds,
-            gradient_at,
-            integration_steps,
-        )
-        if not torch.isfinite(token_attributions).all():
-            raise RuntimeError("Laya Integrated Gradients produced non-finite values")
-        token_values = token_attributions.sum(dim=-1)[0].detach().float().cpu().tolist()
-        state_values = [float(value) for value in token_values[state_start:state_end]]
-        completeness_delta = logit_delta - sum(state_values)
-        if abs(completeness_delta) <= _completeness_tolerance(logit_delta):
-            break
-        if integration_steps >= MAX_IG_COMPUTE_STEPS:
-            _validate_completeness(completeness_delta, logit_delta)
-        integration_steps = min(integration_steps * 2, MAX_IG_COMPUTE_STEPS)
+    token_attributions, integration_steps = integrate_gradients(
+        input_embeds,
+        baseline_embeds,
+        gradient_at,
+        n_steps,
+        completeness_tolerance=_completeness_tolerance(logit_delta),
+        max_steps=MAX_IG_COMPUTE_STEPS,
+    )
+    if not torch.isfinite(token_attributions).all():
+        raise RuntimeError("Laya Integrated Gradients produced non-finite values")
+    token_values = token_attributions.sum(dim=-1)[0].detach().float().cpu().tolist()
+    state_values = [float(value) for value in token_values[state_start:state_end]]
+    completeness_delta = logit_delta - sum(state_values)
+    _validate_completeness(completeness_delta, logit_delta)
 
     sequence_ids = list(item["ids"])
     sequence_tokens = agent.tok.convert_ids_to_tokens(sequence_ids)

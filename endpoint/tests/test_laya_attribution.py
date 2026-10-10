@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from expl_drift_endpoint.contract import AttributionPlan, AttributionSignal
 from expl_drift_endpoint.laya_attribution import (
+    MAX_IG_COMPUTE_STEPS,
     _validate_completeness,
     integrate_gradients,
     state_token_span,
@@ -17,18 +18,24 @@ def test_integrated_gradients_matches_linear_score_difference():
     baseline = np.array([[0.0, 3.0]])
     weights = np.array([[4.0, -2.0]])
 
-    attributions = integrate_gradients(inputs, baseline, lambda _: weights, n_steps=16)
+    attributions, steps = integrate_gradients(
+        inputs,
+        baseline,
+        lambda _: weights,
+        n_steps=16,
+    )
 
     np.testing.assert_allclose(attributions, (inputs - baseline) * weights)
     expected_difference = (inputs * weights).sum() - (baseline * weights).sum()
     np.testing.assert_allclose(attributions.sum(), expected_difference)
+    assert steps >= 16
 
 
 def test_integrated_gradients_integrates_quadratic_score():
     inputs = np.array([[2.0, -3.0]])
     baseline = np.zeros_like(inputs)
 
-    attributions = integrate_gradients(
+    attributions, _ = integrate_gradients(
         inputs,
         baseline,
         lambda point: 2.0 * point,
@@ -38,32 +45,35 @@ def test_integrated_gradients_integrates_quadratic_score():
     np.testing.assert_allclose(attributions, inputs**2)
 
 
-def test_integrated_gradients_trapezoid_converges_for_cubic_gradient():
+def test_integrated_gradients_adaptively_integrates_cubic_gradient():
     inputs = np.array([[1.5]])
     baseline = np.zeros_like(inputs)
 
-    attributions = integrate_gradients(
+    attributions, _ = integrate_gradients(
         inputs,
         baseline,
         lambda point: 4.0 * point**3,
-        n_steps=4096,
+        n_steps=64,
+        completeness_tolerance=1e-10,
     )
 
-    np.testing.assert_allclose(attributions, inputs**4, rtol=1e-7, atol=1e-7)
+    np.testing.assert_allclose(attributions, inputs**4, rtol=1e-12, atol=1e-12)
 
 
-def test_integrated_gradients_trapezoid_converges_for_smooth_path():
+def test_integrated_gradients_adaptively_integrates_smooth_path():
     inputs = np.array([[1.0]])
     baseline = np.zeros_like(inputs)
 
-    attributions = integrate_gradients(
+    attributions, steps = integrate_gradients(
         inputs,
         baseline,
         np.exp,
-        n_steps=4096,
+        n_steps=64,
+        completeness_tolerance=1e-8,
     )
 
     np.testing.assert_allclose(attributions, np.expm1(inputs), rtol=1e-7, atol=1e-7)
+    assert 64 <= steps <= MAX_IG_COMPUTE_STEPS
 
 
 def test_completeness_tolerance_checks_absolute_and_relative_error():
