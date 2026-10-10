@@ -9,7 +9,7 @@ from expl_drift_endpoint.contract import AttributionSignal
 
 COMPLETENESS_ATOL = 0.01
 COMPLETENESS_RTOL = 0.01
-MAX_IG_COMPUTE_STEPS = 2048
+MAX_IG_COMPUTE_STEPS = 4096
 
 
 def integrate_gradients(
