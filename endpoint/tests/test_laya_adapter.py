@@ -110,7 +110,7 @@ def test_endpoint_reports_loaded_score_capability_and_serializes_results():
     with TestClient(create_app(adapter_factory=lambda: response_adapter)) as client:
         health = client.get("/health")
         assert health.status_code == 200
-        assert health.json()["capabilities"] == ["decision_scores"]
+        assert health.json()["capabilities"] == ["decision_scores", "integrated_gradients"]
         response = client.post("/extract", json=payload)
 
     assert response.status_code == 200

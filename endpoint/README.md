@@ -94,7 +94,8 @@ refining the global panel grid up to 4096 gradient evaluations. The response's
 `n_steps` is the actual evaluation count. IG is rejected unless completeness
 residual is at most `0.01 + 0.01 * abs(logit_delta)`.
 Token alignment, finite values, and truncation counts are validated in the response.
-Health advertises only `decision_scores` until real-model GPU qualification passes.
+After remote GPU qualification, health advertises `decision_scores` and
+`integrated_gradients`.
 
 ## Current implementation status
 

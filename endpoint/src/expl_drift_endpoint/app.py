@@ -47,7 +47,7 @@ def create_app(adapter_factory: Callable[[], Any] | None = None) -> FastAPI:
             status="ready",
             reason=None,
             extraction_available=True,
-            capabilities=["decision_scores"],
+            capabilities=["decision_scores", "integrated_gradients"],
             model=adapter.model_revision,
         )
 
