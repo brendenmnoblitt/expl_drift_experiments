@@ -91,7 +91,7 @@ class AttributionSignal(ContractModel):
     target_candidate_id: Identifier
     target_semantics: Literal["candidate_logit"]
     baseline: Literal["pad_document_tokens"]
-    n_steps: int = Field(ge=2, le=1024)
+    n_steps: int = Field(ge=2, le=256)
     token_width: int = Field(ge=1, le=8192)
     token_ids: list[int]
     tokens: list[str]

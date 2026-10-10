@@ -90,7 +90,7 @@ The current response schema returns each sample's predicted candidate ID and
 ordered choice probabilities with `choice_probability` semantics. Requests may
 include candidate-targeted Integrated Gradients with `candidate_logit`
 semantics. IG requests default to 64-step composite Gauss-Legendre quadrature,
-using at most 32 nodes per subinterval, and may adaptively double to 1024 steps
+using at most 32 nodes per subinterval, and may adaptively double to 256 steps
 until completeness residual is at most `0.01 + 0.01 * abs(logit_delta)`.
 Token alignment, finite values, and truncation counts are validated in the response.
 Health advertises only `decision_scores` until real-model GPU qualification passes.
@@ -105,7 +105,7 @@ open. The score path directly calls SDK `predict_batch`; IG uses the pinned SDK'
 private sequence builder/collator and substitutes input embeddings beneath the
 no-grad inference wrapper, retaining Laya's decision head. IG disables autocast
 so forward logits and gradients use the same precision path; composite
-Gauss-Legendre integration adaptively refines up to 1024 steps and enforces a 1%
+Gauss-Legendre integration adaptively refines up to 256 steps and enforces a 1%
 relative / 0.01-logit absolute completeness tolerance. Retest before changing the
 pinned Laya SDK version.
 
