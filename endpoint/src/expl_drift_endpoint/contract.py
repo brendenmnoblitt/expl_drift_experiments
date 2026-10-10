@@ -42,7 +42,7 @@ class AttributionPlan(ContractModel):
 
     method: Literal["attention", "integrated_gradients"]
     target_candidate_id: Identifier
-    n_steps: int = Field(default=64, ge=2, le=64)
+    n_steps: int = Field(default=16, ge=2, le=64)
 
 
 class ExtractionRequest(ContractModel):
