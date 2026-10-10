@@ -6,12 +6,10 @@ on:
     paths:
       - 'endpoint/**'
       - '.github/workflows/endpoint-ci.yml'
-      - '.github/workflows/publish-model-image.yml'
   pull_request:
     paths:
       - 'endpoint/**'
       - '.github/workflows/endpoint-ci.yml'
-      - '.github/workflows/publish-model-image.yml'
 
 permissions:
   contents: read
