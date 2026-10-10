@@ -22,98 +22,78 @@ def integrate_gradients(
     completeness_tolerance: float = 1e-6,
     max_steps: int = MAX_IG_COMPUTE_STEPS,
 ) -> tuple[Any, int]:
-    """Adaptively integrate gradients, using ``n_steps`` to seed the initial grid."""
+    """Refine nested composite-Simpson estimates within a gradient-evaluation cap."""
     if n_steps < 2:
         raise ValueError("n_steps must be at least 2")
     if inputs.shape != baselines.shape:
         raise ValueError("inputs and baselines must have the same shape")
     if completeness_tolerance <= 0:
         raise ValueError("completeness_tolerance must be positive")
+    if max_steps < 2:
+        raise ValueError("max_steps must allow at least two gradient evaluations")
 
     delta = inputs - baselines
-    segments = max(1, n_steps // 8)
     evaluations = 0
 
     def gradient_at_alpha(alpha: float) -> Any:
         nonlocal evaluations
-        if evaluations >= max_steps:
-            raise RuntimeError(
-                f"Adaptive Integrated Gradients exceeded {max_steps} gradient evaluations"
-            )
         gradient = gradient_at(baselines + delta * alpha)
         if gradient.shape != inputs.shape:
             raise ValueError("gradient_at must return a gradient with the input shape")
         evaluations += 1
         return gradient
 
-    def simpson(left, right, left_value, middle_value, right_value):
-        return (right - left) * (left_value + 4.0 * middle_value + right_value) / 6.0
-
-    def projection(integrated_gradient):
+    def projection(integrated_gradient: Any) -> float:
         value = (delta * integrated_gradient).sum()
         if hasattr(value, "detach"):
             value = value.detach().float().cpu().item()
         return float(value)
 
-    def refine(left, middle, right, left_value, middle_value, right_value, coarse, tolerance):
-        left_middle = (left + middle) / 2.0
-        right_middle = (middle + right) / 2.0
-        left_middle_value = gradient_at_alpha(left_middle)
-        right_middle_value = gradient_at_alpha(right_middle)
-        left_integral = simpson(left, middle, left_value, left_middle_value, middle_value)
-        right_integral = simpson(middle, right, middle_value, right_middle_value, right_value)
-        refined = left_integral + right_integral
-        correction = (refined - coarse) / 15.0
-        if abs(projection(correction)) <= tolerance:
-            return refined + correction
-        return refine(
-            left,
-            left_middle,
-            middle,
-            left_value,
-            left_middle_value,
-            middle_value,
-            left_integral,
-            tolerance / 2.0,
-        ) + refine(
-            middle,
-            right_middle,
-            right,
-            middle_value,
-            right_middle_value,
-            right_value,
-            right_integral,
-            tolerance / 2.0,
-        )
+    left_value = gradient_at_alpha(0.0)
+    right_value = gradient_at_alpha(1.0)
+    trapezoid = (left_value + right_value) / 2.0
+    seed_panels = max(2, n_steps // 8)
+    previous_simpson = None
+    panels = 1
+    estimate = trapezoid
 
-    integrated_gradient = None
-    interval_tolerance = completeness_tolerance / segments
-    left = 0.0
-    left_value = gradient_at_alpha(left)
-    for segment in range(segments):
-        right = (segment + 1) / segments
-        middle = (left + right) / 2.0
-        middle_value = gradient_at_alpha(middle)
-        right_value = gradient_at_alpha(right)
-        coarse = simpson(left, right, left_value, middle_value, right_value)
-        segment_integral = refine(
-            left,
-            middle,
-            right,
-            left_value,
-            middle_value,
-            right_value,
-            coarse,
-            interval_tolerance,
-        )
-        integrated_gradient = (
-            segment_integral
-            if integrated_gradient is None
-            else integrated_gradient + segment_integral
-        )
-        left = right
-        left_value = right_value
-    return delta * integrated_gradient, evaluations
+    while panels < seed_panels and evaluations + panels <= max_steps:
+        midpoint_sum = None
+        for index in range(panels):
+            value = gradient_at_alpha((index + 0.5) / panels)
+            if midpoint_sum is None:
+                midpoint_sum = value.clone() if hasattr(value, "clone") else value.copy()
+            else:
+                midpoint_sum += value
+        previous_trapezoid = trapezoid
+        trapezoid = trapezoid / 2.0 + midpoint_sum / (2.0 * panels)
+        panels *= 2
+        estimate = (4.0 * trapezoid - previous_trapezoid) / 3.0
+        previous_simpson = estimate
+
+    while evaluations + panels <= max_steps:
+        midpoint_sum = None
+        for index in range(panels):
+            value = gradient_at_alpha((index + 0.5) / panels)
+            if midpoint_sum is None:
+                midpoint_sum = value.clone() if hasattr(value, "clone") else value.copy()
+            else:
+                midpoint_sum += value
+
+        refined_trapezoid = trapezoid / 2.0 + midpoint_sum / (2.0 * panels)
+        panels *= 2
+        simpson_estimate = (4.0 * refined_trapezoid - trapezoid) / 3.0
+        if (
+            previous_simpson is not None
+            and abs(projection(simpson_estimate - previous_simpson) / 15.0)
+            <= completeness_tolerance
+        ):
+            return delta * simpson_estimate, evaluations
+        previous_simpson = simpson_estimate
+        trapezoid = refined_trapezoid
+        estimate = simpson_estimate
+
+    return delta * estimate, evaluations
 
 
 def _completeness_tolerance(logit_delta: float) -> float:
@@ -281,7 +261,7 @@ def explain_choice(
         completeness_delta = logit_delta - sum(state_values)
         if abs(completeness_delta) <= _completeness_tolerance(logit_delta):
             break
-        if integration_steps >= MAX_IG_COMPUTE_STEPS:
+        if MAX_IG_COMPUTE_STEPS - integration_steps < 2:
             _validate_completeness(completeness_delta, logit_delta)
         quadrature_tolerance /= 2.0
 
