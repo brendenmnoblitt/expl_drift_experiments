@@ -134,9 +134,9 @@ this run. Calibration used only two four-example windows.
 The `calibrated` profile keeps the same model, prompt, target, dataset, and
 detector, with 100 samples in each of ten windows: one baseline, four
 calibration windows, then five windows with spam prevalence rising from 60% to
-100%. Samples are disjoint across windows. Each window is sent as validated,
-resumable requests of at most 32 samples. The run stores monitor thresholds,
-per-metric alert levels, prediction rates, and mean spam probabilities:
+100%. Samples are disjoint across windows. Parent chunks are cached in batches of
+up to 32; larger chunks are split into separately fingerprinted, resumable
+endpoint calls of at most 8 samples. Provenance records all request batch sizes.
 
 During this run, HF's scale-to-zero timeout was temporarily raised from 15 to
 60 minutes after the endpoint scaled down during a long extraction request.

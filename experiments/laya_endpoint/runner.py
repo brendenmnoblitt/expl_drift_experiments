@@ -19,7 +19,15 @@ from urllib.request import urlopen
 
 import numpy as np
 
-from .client import EndpointClient, atomic_write_json, load_cached_response, sha256_json
+from .client import (
+    MAX_ENDPOINT_REQUEST_SAMPLES,
+    EndpointClient,
+    atomic_write_json,
+    load_cached_response,
+    load_cached_subresponses,
+    sha256_json,
+    split_request,
+)
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
@@ -108,6 +116,7 @@ def _merge_resume_provenance(
         normalized = json.loads(json.dumps(value))
         for field in ("image_digest", "image_digests", "legacy_cache_image_digest"):
             normalized["endpoint"].pop(field, None)
+        normalized["experiment"].pop("endpoint_request_batch_sizes", None)
         for field in ("expl_drift_experiments", "experiment_code_revisions"):
             normalized["revisions"].pop(field, None)
         return normalized
@@ -122,6 +131,14 @@ def _merge_resume_provenance(
     )
     code_revisions = list(
         dict.fromkeys([*code_revisions, *current_revisions["experiment_code_revisions"]])
+    )
+    previous_batch_sizes = previous["experiment"].get(
+        "endpoint_request_batch_sizes", [MAX_BATCH_SAMPLES]
+    )
+    current["experiment"]["endpoint_request_batch_sizes"] = list(
+        dict.fromkeys(
+            [*previous_batch_sizes, *current["experiment"]["endpoint_request_batch_sizes"]]
+        )
     )
     current_endpoint["image_digests"] = image_digests
     legacy_cache_image_digest = previous_endpoint.get("legacy_cache_image_digest", previous_image)
@@ -306,6 +323,7 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
                 {"ham": counts[0], "spam": counts[1]} for counts in window_class_counts
             ],
             "max_tokens": MAX_TOKENS,
+            "endpoint_request_batch_sizes": [MAX_ENDPOINT_REQUEST_SAMPLES],
             "attribution": "integrated_gradients target=spam candidate_logit n_steps=64",
             "drift_injection": (
                 "synthetic class-prior shift by deterministic sampling without replacement"
@@ -364,16 +382,41 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
                 cached_entry = json.loads(cache_path.read_text(encoding="utf-8"))
                 if cached_entry.get("labels") != expected_labels:
                     raise ValueError(f"cached labels differ for window {window_index}")
-                cache_image_digest = cached_entry.get("endpoint_image_digest")
-                if cache_image_digest is None:
-                    cache_image_digest = legacy_cache_image_digest
+                if "endpoint_image_digests" in cached_entry:
+                    cached_digests = cached_entry["endpoint_image_digests"]
+                    if not isinstance(cached_digests, list):
+                        raise ValueError(
+                            f"cache {cache_path} has invalid endpoint image provenance"
+                        )
+                    subresponses = cached_entry.get("subresponses", [])
+                    if not isinstance(subresponses, list):
+                        raise ValueError(f"cache {cache_path} has invalid subresponses")
+                    subrequest_digests = {
+                        part.get("endpoint_image_digest")
+                        for part in subresponses
+                        if isinstance(part, dict)
+                    }
+                    if not subrequest_digests.issubset(set(cached_digests)):
+                        raise ValueError(f"cache {cache_path} omits a subrequest image digest")
+                    for cached_digest in cached_digests:
+                        if cached_digest not in provenance["endpoint"]["image_digests"]:
+                            raise ValueError(
+                                f"cache {cache_path} references an unrecorded endpoint image"
+                            )
+                        cache_image_digests.add(cached_digest)
+                else:
+                    cache_image_digest = cached_entry.get("endpoint_image_digest")
                     if cache_image_digest is None:
-                        raise ValueError(f"cache {cache_path} has no endpoint image provenance")
-                    cached_entry["endpoint_image_digest"] = cache_image_digest
-                    atomic_write_json(cache_path, cached_entry)
-                if cache_image_digest not in provenance["endpoint"]["image_digests"]:
-                    raise ValueError(f"cache {cache_path} references an unrecorded endpoint image")
-                cache_image_digests.add(cache_image_digest)
+                        cache_image_digest = legacy_cache_image_digest
+                        if cache_image_digest is None:
+                            raise ValueError(f"cache {cache_path} has no endpoint image provenance")
+                        cached_entry["endpoint_image_digest"] = cache_image_digest
+                        atomic_write_json(cache_path, cached_entry)
+                    if cache_image_digest not in provenance["endpoint"]["image_digests"]:
+                        raise ValueError(
+                            f"cache {cache_path} references an unrecorded endpoint image"
+                        )
+                    cache_image_digests.add(cache_image_digest)
             response = load_cached_response(cache_path, request)
             if response is None:
                 print(
@@ -381,23 +424,69 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
                     f"batch {chunk_index + 1}/{len(chunks)}: {request['request_id']}",
                     flush=True,
                 )
-                try:
-                    response = client.extract(request)
-                except Exception as error:
-                    raise RuntimeError(
-                        f"endpoint extraction failed for window {window_index} "
-                        f"batch {chunk_index} ({request['request_id']})"
-                    ) from error
-                cache_image_digests.add(image_digest)
-                atomic_write_json(
-                    cache_path,
-                    {
-                        "request_sha256": sha256_json(request),
-                        "labels": expected_labels,
-                        "endpoint_image_digest": image_digest,
-                        "response": response,
-                    },
-                )
+                if len(request["samples"]) > MAX_ENDPOINT_REQUEST_SAMPLES:
+                    subresponses = load_cached_subresponses(cache_path, request)
+                    cached_by_fingerprint = {part["request_sha256"]: part for part in subresponses}
+                    for subrequest in split_request(request):
+                        subrequest_fingerprint = sha256_json(subrequest)
+                        cached_part = cached_by_fingerprint.get(subrequest_fingerprint)
+                        if cached_part is not None:
+                            cache_image_digests.add(cached_part["endpoint_image_digest"])
+                            print(
+                                f"Reusing validated subrequest {subrequest['request_id']}",
+                                flush=True,
+                            )
+                            continue
+                        try:
+                            subresponse = client.extract(subrequest)
+                        except Exception as error:
+                            raise RuntimeError(
+                                f"endpoint extraction failed for subrequest "
+                                f"{subrequest['request_id']}"
+                            ) from error
+                        subresponses.append(
+                            {
+                                "request_sha256": subrequest_fingerprint,
+                                "request": subrequest,
+                                "endpoint_image_digest": image_digest,
+                                "response": subresponse,
+                            }
+                        )
+                        cache_image_digests.add(image_digest)
+                        atomic_write_json(
+                            cache_path,
+                            {
+                                "request_sha256": sha256_json(request),
+                                "labels": expected_labels,
+                                "endpoint_image_digests": sorted(
+                                    {part["endpoint_image_digest"] for part in subresponses}
+                                ),
+                                "subresponses": subresponses,
+                            },
+                        )
+                    response = load_cached_response(cache_path, request)
+                    if response is None:
+                        raise ValueError(
+                            f"subresponses did not cover parent batch {request['request_id']}"
+                        )
+                else:
+                    try:
+                        response = client.extract(request)
+                    except Exception as error:
+                        raise RuntimeError(
+                            f"endpoint extraction failed for window {window_index} "
+                            f"batch {chunk_index} ({request['request_id']})"
+                        ) from error
+                    cache_image_digests.add(image_digest)
+                    atomic_write_json(
+                        cache_path,
+                        {
+                            "request_sha256": sha256_json(request),
+                            "labels": expected_labels,
+                            "endpoint_image_digest": image_digest,
+                            "response": response,
+                        },
+                    )
                 print(
                     f"Validated and cached window {window_index + 1}/{len(windows)} "
                     f"batch {chunk_index + 1}/{len(chunks)}",

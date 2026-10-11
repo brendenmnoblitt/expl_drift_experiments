@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-validate_response = import_module("experiments.laya_endpoint.client").validate_response
+client = import_module("experiments.laya_endpoint.client")
+validate_response = client.validate_response
 
 
 @pytest.fixture
@@ -115,3 +116,51 @@ def test_rejects_invalid_scores_or_ig_alignment(request_payload, response_payloa
 
     with pytest.raises(ValueError, match=message):
         validate_response(request_payload, response)
+
+
+def test_split_batch_cache_resumes_and_merges_validated_subresponses(
+    tmp_path, request_payload, response_payload
+):
+    request = copy.deepcopy(request_payload)
+    request["samples"] = [
+        {"sample_id": f"youtube-{index}", "text": f"Comment {index}."} for index in range(9)
+    ]
+    request["corpus_sha256"] = client.sha256_json(request["samples"])
+    subrequests = client.split_request(request)
+
+    assert [len(part["samples"]) for part in subrequests] == [8, 1]
+    assert [sample for part in subrequests for sample in part["samples"]] == request["samples"]
+
+    def part_record(part):
+        response = copy.deepcopy(response_payload)
+        response["request_id"] = part["request_id"]
+        response["run_id"] = part["run_id"]
+        response["window_index"] = part["window_index"]
+        response["samples"] = []
+        for sample in part["samples"]:
+            output = copy.deepcopy(response_payload["samples"][0])
+            output["sample_id"] = sample["sample_id"]
+            response["samples"].append(output)
+        return {
+            "request_sha256": client.sha256_json(part),
+            "request": part,
+            "endpoint_image_digest": "sha256:" + "a" * 64,
+            "response": response,
+        }
+
+    cache_path = tmp_path / "window.json"
+    cache_entry = {
+        "request_sha256": client.sha256_json(request),
+        "subresponses": [part_record(subrequests[0])],
+    }
+    client.atomic_write_json(cache_path, cache_entry)
+    assert client.load_cached_response(cache_path, request) is None
+
+    cache_entry["subresponses"].append(part_record(subrequests[1]))
+    client.atomic_write_json(cache_path, cache_entry)
+    merged = client.load_cached_response(cache_path, request)
+
+    assert [sample["sample_id"] for sample in merged["samples"]] == [
+        sample["sample_id"] for sample in request["samples"]
+    ]
+    assert merged["request_id"] == request["request_id"]

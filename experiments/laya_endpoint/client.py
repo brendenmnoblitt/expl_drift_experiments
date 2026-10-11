@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -16,6 +17,8 @@ COMPLETENESS_ATOL = 0.01
 COMPLETENESS_RTOL = 0.01
 MAX_IG_COMPUTE_STEPS = 16384
 
+MAX_ENDPOINT_REQUEST_SAMPLES = 8
+
 
 def canonical_json(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
@@ -23,6 +26,119 @@ def canonical_json(value: Any) -> bytes:
 
 def sha256_json(value: Any) -> str:
     return hashlib.sha256(canonical_json(value)).hexdigest()
+
+
+def split_request(request: dict[str, Any]) -> list[dict[str, Any]]:
+    """Split one cached batch into smaller, independently fingerprinted calls."""
+    samples = request["samples"]
+    if len(samples) <= MAX_ENDPOINT_REQUEST_SAMPLES:
+        return [copy.deepcopy(request)]
+    subrequests = []
+    for index, start in enumerate(range(0, len(samples), MAX_ENDPOINT_REQUEST_SAMPLES)):
+        subrequest = copy.deepcopy(request)
+        subrequest["samples"] = samples[start : start + MAX_ENDPOINT_REQUEST_SAMPLES]
+        subrequest["request_id"] = f"{request['request_id']}-part{index}"
+        subrequest["corpus_sha256"] = sha256_json(subrequest["samples"])
+        subrequests.append(subrequest)
+    return subrequests
+
+
+def load_cached_subresponses(path: Path, request: dict[str, Any]) -> list[dict[str, Any]]:
+    """Load validated child responses from a partially completed parent batch."""
+    if not path.exists():
+        return []
+    entry = json.loads(path.read_text(encoding="utf-8"))
+    if entry.get("request_sha256") != sha256_json(request):
+        raise ValueError(f"cached window {path} belongs to a different request")
+    subresponses = entry.get("subresponses", [])
+    if not isinstance(subresponses, list):
+        raise ValueError(f"cached window {path} has invalid subresponses")
+    _validate_subresponses(request, subresponses)
+    return subresponses
+
+
+def _validate_subresponses(
+    request: dict[str, Any], subresponses: list[dict[str, Any]]
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Validate child payloads and return their sample results in parent order."""
+    parent_ids = [sample["sample_id"] for sample in request["samples"]]
+    parent_id_set = set(parent_ids)
+    sample_results = {}
+    child_hashes = set()
+    child_request_ids = set()
+    for subresponse in subresponses:
+        if not isinstance(subresponse, dict):
+            raise ValueError("cached subresponse must be an object")
+        child_request = subresponse.get("request")
+        child_response = subresponse.get("response")
+        if not isinstance(child_request, dict) or not isinstance(child_response, dict):
+            raise ValueError("cached subresponse has no request or response")
+        if set(child_request) != set(request):
+            raise ValueError("cached subrequest fields differ from its parent")
+        child_request_id = child_request.get("request_id")
+        if (
+            not isinstance(child_request_id, str)
+            or child_request_id == request["request_id"]
+            or child_request_id in child_request_ids
+        ):
+            raise ValueError("cached subrequest ID is invalid or duplicated")
+        child_request_ids.add(child_request_id)
+        child_hash = sha256_json(child_request)
+        if subresponse.get("request_sha256") != child_hash or child_hash in child_hashes:
+            raise ValueError("cached subresponse request fingerprint is invalid")
+        child_hashes.add(child_hash)
+        for field, value in request.items():
+            if (
+                field not in {"request_id", "corpus_sha256", "samples"}
+                and child_request.get(field) != value
+            ):
+                raise ValueError(f"cached subrequest {field} differs from its parent")
+        child_samples = child_request.get("samples")
+        child_ids = (
+            [sample.get("sample_id") for sample in child_samples]
+            if isinstance(child_samples, list)
+            else []
+        )
+        if (
+            not child_ids
+            or len(child_ids) > MAX_ENDPOINT_REQUEST_SAMPLES
+            or len(child_ids) != len(set(child_ids))
+            or any(sample_id not in parent_id_set for sample_id in child_ids)
+            or child_request.get("corpus_sha256") != sha256_json(child_samples)
+        ):
+            raise ValueError("cached subrequest sample fingerprint or size is invalid")
+        if child_ids != sorted(child_ids, key=parent_ids.index):
+            raise ValueError("cached subrequest sample order differs from its parent")
+        validate_response(child_request, child_response)
+        if subresponse.get("endpoint_image_digest") is not None and not isinstance(
+            subresponse["endpoint_image_digest"], str
+        ):
+            raise ValueError("cached subresponse image digest is invalid")
+        for sample in child_response["samples"]:
+            sample_id = sample["sample_id"]
+            if sample_id in sample_results:
+                raise ValueError(f"cached subresponses duplicate sample {sample_id}")
+            sample_results[sample_id] = sample
+    return sample_results, [
+        sample_results[sample_id] for sample_id in parent_ids if sample_id in sample_results
+    ]
+
+
+def merge_subresponses(
+    request: dict[str, Any], subresponses: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Assemble a parent response only when validated child outputs cover it exactly."""
+    sample_results, ordered_samples = _validate_subresponses(request, subresponses)
+    expected_ids = [sample["sample_id"] for sample in request["samples"]]
+    if len(sample_results) != len(expected_ids):
+        return None
+    response = copy.deepcopy(subresponses[0]["response"])
+    response["request_id"] = request["request_id"]
+    response["run_id"] = request["run_id"]
+    response["window_index"] = request["window_index"]
+    response["samples"] = ordered_samples
+    validate_response(request, response)
+    return response
 
 
 def validate_response(request: dict[str, Any], response: dict[str, Any]) -> None:
@@ -201,6 +317,8 @@ def load_cached_response(path: Path, request: dict[str, Any]) -> dict[str, Any] 
     expected_fingerprint = sha256_json(request)
     if entry.get("request_sha256") != expected_fingerprint:
         raise ValueError(f"cached window {path} belongs to a different request")
+    if "subresponses" in entry:
+        return merge_subresponses(request, load_cached_subresponses(path, request))
     response = entry.get("response")
     if not isinstance(response, dict):
         raise ValueError(f"cached window {path} has no response object")

@@ -49,7 +49,10 @@ def test_resume_provenance_tracks_image_and_runner_revisions():
     previous = {
         "dataset": {"archive_sha256": "d" * 64},
         "endpoint": {"url": "https://endpoint", "image_digest": old_image},
-        "experiment": {"profile": "calibrated"},
+        "experiment": {
+            "profile": "calibrated",
+            "endpoint_request_batch_sizes": [32],
+        },
         "revisions": {
             "expl_drift": "e" * 40,
             "expl_drift_experiments": "f" * 40,
@@ -58,7 +61,10 @@ def test_resume_provenance_tracks_image_and_runner_revisions():
     current = {
         "dataset": {"archive_sha256": "d" * 64},
         "endpoint": {"url": "https://endpoint", "image_digest": new_image},
-        "experiment": {"profile": "calibrated"},
+        "experiment": {
+            "profile": "calibrated",
+            "endpoint_request_batch_sizes": [8],
+        },
         "revisions": {
             "expl_drift": "e" * 40,
             "expl_drift_experiments": "1" * 40,
@@ -74,6 +80,7 @@ def test_resume_provenance_tracks_image_and_runner_revisions():
     assert merged["endpoint"]["legacy_cache_image_digest"] == old_image
     assert legacy_image == old_image
     assert merged["revisions"]["experiment_code_revisions"] == ["f" * 40, "1" * 40]
+    assert merged["experiment"]["endpoint_request_batch_sizes"] == [32, 8]
 
 
 def test_resume_provenance_requires_explicit_previous_image():
