@@ -112,9 +112,9 @@ windows:
 Baseline accuracy was 1.00; mean accuracy over later windows was 0.70. Four
 examples per window are too few for an inference about detector behavior. UCI
 YouTube Spam is not listed among the pinned model-card benchmarks, but Laya's
-full training mix is undisclosed, so overlap cannot be certified. Independent
-native-SDK score parity also remains open; do not interpret this run's IG drift
-as a qualified result until that gate passes.
+full training mix is undisclosed, so overlap cannot be certified. Native-SDK
+score parity is still unverified; that limits claims that this adapter matches
+the SDK, not observations of outputs from the pinned endpoint itself.
 
 ### Threshold replay and larger follow-up
 
@@ -147,9 +147,14 @@ LAYA_EXPERIMENT_OUTPUT="results/laya-youtube-spam-calibrated" \
   python -m experiments.laya_endpoint.runner --profile calibrated
 ```
 
-This tests whether more calibration data gives usable thresholds; it does not
-guarantee an alert. The run remains exploratory, and its IG results remain
-unqualified pending independent native-SDK score parity.
+The `calibrated` run remains exploratory. Partial results show explanation
+distribution changes and detector alerts on the deployed endpoint's outputs
+under the synthetic class-prior shift. The run also has task labels and
+per-window accuracy measurements, but it does not establish that alerts
+reliably track production degradation: that requires a systematic comparison
+of alert behavior with an independent quality or health measure over matching
+windows. Do not generalize this synthetic input-mix result to production
+performance.
 
 ## Citation
 

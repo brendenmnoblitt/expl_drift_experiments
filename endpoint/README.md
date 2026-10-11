@@ -4,8 +4,9 @@ The endpoint has a CPU-only validation image and a separate Laya model image.
 The model image loads the pinned English base Laya checkpoint from HF's
 `/repository` mount and serves decision scores through `/extract`. It also has an
 Integrated Gradients path for candidate-logit attribution. Health capabilities
-report implemented paths, not scientific qualification; neither IG nor drift
-interpretations are qualified until the remote checks below pass.
+report implemented paths, not scientific qualification. Endpoint qualification
+checks focus on whether the declared generation-time score, attribution target,
+and token alignment are measured; they do not judge Laya's general correctness.
 
 The endpoint package is independent of the experiments package's eager
 training/plotting imports. It returns model signals only; the host-side
@@ -114,8 +115,9 @@ precision path. Adaptive composite Gauss-Legendre integration bisects the
 highest-error interval until completeness passes or the 16384-evaluation cap is hit.
 The remote pilot's 24 examples passed finite-value, token-alignment, truncation,
 and hard completeness validation. Independent decision-score parity against a
-native-SDK reference remains open; do not interpret explanation drift until that
-gate passes.
+native-SDK reference remains open. That comparison is needed to claim
+equivalence to the SDK, not to observe the pinned endpoint's own outputs;
+interpret those observations as endpoint behavior, not SDK-parity evidence.
 
 ### Remote pilot check on October 10 2026
 
