@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from expl_drift_endpoint.contract import MAX_IG_COMPUTE_STEPS, AttributionSignal
+from expl_drift_endpoint.contract import (
+    MAX_IG_COMPUTE_STEPS,
+    AttributionSignal,
+    TokenSignal,
+)
 
 COMPLETENESS_ATOL = 0.01
 COMPLETENESS_RTOL = 0.01
@@ -164,168 +168,174 @@ def _model_inputs(agent: Any, batch: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _call_with_embeddings(
-    agent: Any,
-    batch: Mapping[str, Any],
-    embeddings: Any,
-    target_index: int,
-    *,
-    use_autocast: bool = True,
-):
-    """Run the unchanged Laya decision head with supplied word embeddings."""
-    torch = __import__("torch")
-    model = agent.model
-    device = agent.device
-    values = _model_inputs(agent, batch)
+def _forward(agent: Any, batch: Mapping[str, Any], embeddings: Any = None, *, capture=False):
+    """Run the actual SDK DecisionModel, disabling autocast for every quantity.
 
-    def substitute_embeddings(module, args, kwargs):
-        kwargs = dict(kwargs)
-        kwargs["input_ids"] = None
-        kwargs["inputs_embeds"] = embeddings
-        return args, kwargs
-
-    embedding_module = model.encoder.embeddings
-    handle = embedding_module.register_forward_pre_hook(substitute_embeddings, with_kwargs=True)
-    try:
-        with torch.autocast(
-            device_type=device.type,
-            dtype=agent.dtype,
-            enabled=agent.amp_enabled and use_autocast,
-        ):
-            logits, _ = model(**values)
-        return logits[0, target_index]
-    finally:
-        handle.remove()
-
-
-def explain_choice(
-    agent: Any,
-    state: str,
-    instructions: str,
-    candidates: Sequence[tuple[str, str]],
-    target_candidate_id: str,
-    *,
-    max_tokens: int,
-    n_steps: int,
-) -> AttributionSignal:
-    """Attribute one Laya candidate logit to retained document-token embeddings.
-
-    The SDK's private sequence builder and collator preserve the exact serialization,
-    candidate markers, and truncation used by ``predict_batch``. A forward hook only
-    substitutes ModernBERT token embeddings; Laya's encoder and decision head still run.
+    laya 0.3.29 common.DecisionModel calls encoder(...).last_hidden_state before
+    its type embedding/head. Capture precisely that tensor, not the head's CLS pool.
+    ModernBERT's embeddings module accepts input_ids and inputs_embeds; replacing
+    only that module leaves SDK attention/option masks and decision heads intact.
     """
     import torch
+
+    handles = []
+    hidden = []
+    if embeddings is not None:
+        def substitute_embeddings(module, args, kwargs):
+            kwargs = dict(kwargs)
+            kwargs["input_ids"] = None
+            kwargs["inputs_embeds"] = embeddings
+            return args, kwargs
+
+        handles.append(agent.model.encoder.embeddings.register_forward_pre_hook(
+            substitute_embeddings, with_kwargs=True
+        ))
+    if capture:
+        def save_hidden(module, args, output):
+            hidden.append(output.last_hidden_state)
+
+        handles.append(agent.model.encoder.register_forward_hook(save_hidden))
+    try:
+        with torch.autocast(device_type=agent.device.type, enabled=False):
+            logits, _ = agent.model(**_model_inputs(agent, batch))
+        if capture and len(hidden) != 1:
+            raise RuntimeError("SDK encoder must emit exactly one last_hidden_state")
+        return logits, hidden[0] if capture else None
+    finally:
+        for handle in handles:
+            handle.remove()
+
+
+def encode_batch(agent: Any, request: Any):
+    """Use the pinned SDK serialization and collator for both scoring and IG."""
     from laya.common import collate_items
 
-    candidate_ids = [candidate_id for candidate_id, _ in candidates]
-    target_index = candidate_ids.index(target_candidate_id)
     question = {
         "type": "choice",
-        "instructions": instructions,
-        "criteria": {candidate_id: description for candidate_id, description in candidates},
+        "instructions": request.instructions,
+        "criteria": {
+            candidate.candidate_id: candidate.description for candidate in request.candidates
+        },
     }
     internal = {"expl_drift_target": agent._to_internal(question)}
-    item = agent._encode_state(
-        state,
-        ["expl_drift_target"],
-        internal,
-        max_len=max_tokens,
-        head_max_len=int(agent.cfg.get("head_max_len", 192)),
-    )[0]
+    items = [
+        agent._encode_state(
+            sample.text, ["expl_drift_target"], internal,
+            max_len=request.max_tokens, head_max_len=int(agent.cfg.get("head_max_len", 192)),
+        )[0]
+        for sample in request.samples
+    ]
     pad_id = agent.tok.pad_token_id
     if pad_id is None:
-        raise ValueError("Laya tokenizer must define a pad token for the IG baseline")
-    batch = collate_items([[item]], pad_id)
-    input_ids = batch["input_ids"].to(agent.device)
-    state_start, state_end = state_token_span(len(item["ids"]), item["state_stats"])
-    state_tokens_used = state_end - state_start
+        raise ValueError("Laya tokenizer must define a pad token for the document baseline")
+    return items, collate_items([[item] for item in items], pad_id)
 
+
+def token_signal(agent: Any, item: Mapping[str, Any], candidate_ids: Sequence[str]) -> TokenSignal:
+    sequence_ids = list(item["ids"])
+    start, end = state_token_span(len(sequence_ids), item["state_stats"])
+    segments = ["instruction"] * len(sequence_ids)
+    markers = item["markers"]
+    if len(markers) != len(candidate_ids):
+        raise ValueError("SDK candidate markers differ from requested candidates")
+    for index, candidate_id in enumerate(candidate_ids):
+        candidate_start = markers[index]
+        candidate_end = markers[index + 1] if index + 1 < len(markers) else start - 1
+        segments[candidate_start:candidate_end] = [
+            f"candidate:{candidate_id}"
+        ] * (candidate_end - candidate_start)
+        segments[candidate_start] = f"candidate_marker:{candidate_id}"
+    segments[start:end] = ["document"] * (end - start)
+    special_ids = set(agent.tok.all_special_ids)
+    for position, token_id in enumerate(sequence_ids):
+        if token_id in special_ids and segments[position] == "instruction":
+            segments[position] = "special"
+    width = int(agent.cfg["max_len"])
+    padding = width - len(sequence_ids)
+    if padding < 0:
+        raise ValueError("SDK sequence exceeds the configured model width")
+    sequence_ids.extend([agent.tok.pad_token_id] * padding)
+    segments.extend(["padding"] * padding)
+    return TokenSignal(
+        token_width=width, token_ids=sequence_ids,
+        tokens=agent.tok.convert_ids_to_tokens(sequence_ids), segments=segments,
+        state_token_start=start, state_token_count=end - start,
+        state_tokens_total=int(item["state_stats"]["state_tokens"]),
+        state_tokens_dropped=int(item["state_stats"]["state_tokens_dropped"]),
+    )
+
+
+def document_mean(hidden: Any, row: int, tokens: TokenSignal):
+    """Exclude instruction/candidate/separator/padding tokens from encoder pooling."""
+    start = tokens.state_token_start
+    end = start + tokens.state_token_count
+    if end == start:
+        raise ValueError("document mean pooling requires at least one retained document token")
+    if hidden.ndim != 3 or end > hidden.shape[1]:
+        raise ValueError("encoder last_hidden_state is incompatible with the document span")
+    return hidden[row, start:end].mean(dim=0)
+
+
+def explain_margin(
+    agent: Any,
+    batch: Mapping[str, Any],
+    tokens: TokenSignal,
+    target: Any,
+    candidate_ids: Sequence[str],
+    row: int,
+    direct_logits: Any,
+    *,
+    n_steps: int,
+) -> AttributionSignal:
+    """Explain a fixed raw-logit difference in the exact scoring batch context."""
+    import torch
+
+    target_index = candidate_ids.index(target.target_candidate_id)
+    reference_index = candidate_ids.index(target.reference_candidate_id)
+    input_ids = batch["input_ids"].to(agent.device)
+    start, end = tokens.state_token_start, tokens.state_token_start + tokens.state_token_count
     baseline_ids = input_ids.clone()
-    baseline_ids[:, state_start:state_end] = pad_id
+    baseline_ids[row, start:end] = agent.tok.pad_token_id
     word_embeddings = agent.model.encoder.get_input_embeddings()
     with torch.no_grad():
         input_embeds = word_embeddings(input_ids).detach()
         baseline_embeds = word_embeddings(baseline_ids).detach()
+        input_logits, _ = _forward(agent, batch, input_embeds)
+        baseline_logits, _ = _forward(agent, batch, baseline_embeds)
+    if not torch.allclose(input_logits, direct_logits, rtol=1e-4, atol=1e-4):
+        raise RuntimeError("Laya embedding path changed the reported decision logits")
 
-    # Keep input, baseline, and gradients on the same full-precision model path.
-    with torch.no_grad():
-        direct_logits, _ = agent.model(**_model_inputs(agent, batch))
-        input_logit = _call_with_embeddings(
-            agent, batch, input_embeds, target_index, use_autocast=False
-        )
-        baseline_logit = _call_with_embeddings(
-            agent, batch, baseline_embeds, target_index, use_autocast=False
-        )
-    if not torch.allclose(input_logit, direct_logits[0, target_index], rtol=1e-4, atol=1e-4):
-        raise RuntimeError("Laya embedding path changed the target decision logit")
-    input_logit_value = float(input_logit.float().cpu().item())
-    baseline_logit_value = float(baseline_logit.float().cpu().item())
+    def quantity(logits):
+        return logits[row, target_index] - logits[row, reference_index]
+
+    input_value = float(quantity(input_logits).cpu().item())
+    baseline_value = float(quantity(baseline_logits).cpu().item())
 
     def gradient_at(point):
         point = point.detach().requires_grad_(True)
         with torch.enable_grad():
-            score = _call_with_embeddings(agent, batch, point, target_index, use_autocast=False)
-            return torch.autograd.grad(score, point, retain_graph=False)[0].detach()
+            logits, _ = _forward(agent, batch, point)
+            return torch.autograd.grad(quantity(logits), point, retain_graph=False)[0].detach()
 
-    logit_delta = input_logit_value - baseline_logit_value
-    completeness_tolerance = _completeness_tolerance(logit_delta)
-    token_attributions, integration_steps = integrate_gradients(
-        input_embeds,
-        baseline_embeds,
-        gradient_at,
-        n_steps,
-        max_steps=MAX_IG_COMPUTE_STEPS,
-        target_delta=logit_delta,
-        completeness_tolerance=completeness_tolerance,
+    target_delta = input_value - baseline_value
+    attributions, evaluations = integrate_gradients(
+        input_embeds, baseline_embeds, gradient_at, n_steps,
+        max_steps=MAX_IG_COMPUTE_STEPS, target_delta=target_delta,
+        completeness_tolerance=_completeness_tolerance(target_delta),
     )
-    if not torch.isfinite(token_attributions).all():
+    if not torch.isfinite(attributions).all():
         raise RuntimeError("Laya Integrated Gradients produced non-finite values")
-    token_values = token_attributions.sum(dim=-1)[0].detach().float().cpu().tolist()
-    state_values = [float(value) for value in token_values[state_start:state_end]]
-    completeness_delta = logit_delta - sum(state_values)
-    _validate_completeness(completeness_delta, logit_delta)
-    sequence_ids = list(item["ids"])
-    sequence_tokens = agent.tok.convert_ids_to_tokens(sequence_ids)
-    sequence_segments = ["instruction"] * len(sequence_ids)
-    markers = item["markers"]
-    for index, (candidate_id, _) in enumerate(candidates):
-        start = markers[index]
-        end = markers[index + 1] if index + 1 < len(markers) else state_start - 1
-        for position in range(start, end):
-            sequence_segments[position] = f"candidate:{candidate_id}"
-        sequence_segments[start] = f"candidate_marker:{candidate_id}"
-    sequence_segments[state_start:state_end] = ["document"] * state_tokens_used
-    special_ids = set(agent.tok.all_special_ids)
-    for position, token_id in enumerate(sequence_ids):
-        if token_id in special_ids and sequence_segments[position] == "instruction":
-            sequence_segments[position] = "special"
+    values = attributions.sum(dim=-1)[row].detach().cpu().tolist()
+    values.extend([0.0] * (tokens.token_width - len(values)))
+    import math
 
-    state_stats = item["state_stats"]
-    total_tokens = int(state_stats["state_tokens"])
-    dropped_tokens = int(state_stats["state_tokens_dropped"])
-    width = int(agent.cfg.get("max_len", max_tokens))
-    padding = width - len(sequence_ids)
-    if padding < 0:
-        raise ValueError("Laya encoded sequence exceeds the configured model width")
-    sequence_ids.extend([pad_id] * padding)
-    sequence_tokens.extend(agent.tok.convert_ids_to_tokens([pad_id] * padding))
-    sequence_segments.extend(["padding"] * padding)
-    token_values.extend([0.0] * padding)
-
+    residual = target_delta - math.fsum(values[start:end])
+    _validate_completeness(residual, target_delta)
     return AttributionSignal(
-        method="integrated_gradients",
-        target_candidate_id=target_candidate_id,
-        target_semantics="candidate_logit",
-        baseline="pad_document_tokens",
-        n_steps=integration_steps,
-        token_width=width,
-        token_ids=sequence_ids,
-        tokens=sequence_tokens,
-        segments=sequence_segments,
-        values=[float(value) for value in token_values],
-        state_token_start=state_start,
-        state_token_count=state_tokens_used,
-        state_tokens_total=total_tokens,
-        state_tokens_dropped=dropped_tokens,
-        completeness_delta=completeness_delta,
+        method="integrated_gradients", target_semantics="fixed_candidate_margin",
+        target_candidate_id=target.target_candidate_id,
+        reference_candidate_id=target.reference_candidate_id,
+        baseline="pad_document_tokens", n_steps_requested=n_steps,
+        gradient_evaluations=evaluations, input_target_value=input_value,
+        baseline_target_value=baseline_value, values=values, completeness_delta=residual,
     )

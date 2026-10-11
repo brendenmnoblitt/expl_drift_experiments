@@ -12,6 +12,7 @@ wheels/
 # Archived results
 results/archive/
 notebooks/archived/
+results/research-extension-data/
 
 # Models
 results/models

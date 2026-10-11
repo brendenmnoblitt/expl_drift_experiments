@@ -60,185 +60,251 @@ def load_cached_subresponses(path: Path, request: dict[str, Any]) -> list[dict[s
 def _validate_subresponses(
     request: dict[str, Any], subresponses: list[dict[str, Any]]
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Validate child payloads and return their sample results in parent order."""
-    parent_ids = [sample["sample_id"] for sample in request["samples"]]
-    parent_id_set = set(parent_ids)
-    sample_results = {}
-    child_hashes = set()
-    child_request_ids = set()
-    for subresponse in subresponses:
-        if not isinstance(subresponse, dict):
+    """Accept only exact planned child batches, including text and runtime."""
+    expected = {sha256_json(child): child for child in split_request(request)}
+    results = {}
+    seen = set()
+    for record in subresponses:
+        if not isinstance(record, dict):
             raise ValueError("cached subresponse must be an object")
-        child_request = subresponse.get("request")
-        child_response = subresponse.get("response")
-        if not isinstance(child_request, dict) or not isinstance(child_response, dict):
-            raise ValueError("cached subresponse has no request or response")
-        if set(child_request) != set(request):
-            raise ValueError("cached subrequest fields differ from its parent")
-        child_request_id = child_request.get("request_id")
+        child = record.get("request")
+        fingerprint = record.get("request_sha256")
         if (
-            not isinstance(child_request_id, str)
-            or child_request_id == request["request_id"]
-            or child_request_id in child_request_ids
+            not isinstance(child, dict)
+            or fingerprint not in expected
+            or fingerprint in seen
+            or child != expected[fingerprint]
+            or sha256_json(child) != fingerprint
         ):
-            raise ValueError("cached subrequest ID is invalid or duplicated")
-        child_request_ids.add(child_request_id)
-        child_hash = sha256_json(child_request)
-        if subresponse.get("request_sha256") != child_hash or child_hash in child_hashes:
-            raise ValueError("cached subresponse request fingerprint is invalid")
-        child_hashes.add(child_hash)
-        for field, value in request.items():
-            if (
-                field not in {"request_id", "corpus_sha256", "samples"}
-                and child_request.get(field) != value
-            ):
-                raise ValueError(f"cached subrequest {field} differs from its parent")
-        child_samples = child_request.get("samples")
-        child_ids = (
-            [sample.get("sample_id") for sample in child_samples]
-            if isinstance(child_samples, list)
-            else []
-        )
-        if (
-            not child_ids
-            or len(child_ids) > MAX_ENDPOINT_REQUEST_SAMPLES
-            or len(child_ids) != len(set(child_ids))
-            or any(sample_id not in parent_id_set for sample_id in child_ids)
-            or child_request.get("corpus_sha256") != sha256_json(child_samples)
-        ):
-            raise ValueError("cached subrequest sample fingerprint or size is invalid")
-        if child_ids != sorted(child_ids, key=parent_ids.index):
-            raise ValueError("cached subrequest sample order differs from its parent")
-        validate_response(child_request, child_response)
-        if subresponse.get("endpoint_image_digest") is not None and not isinstance(
-            subresponse["endpoint_image_digest"], str
-        ):
-            raise ValueError("cached subresponse image digest is invalid")
-        for sample in child_response["samples"]:
-            sample_id = sample["sample_id"]
-            if sample_id in sample_results:
-                raise ValueError(f"cached subresponses duplicate sample {sample_id}")
-            sample_results[sample_id] = sample
-    return sample_results, [
-        sample_results[sample_id] for sample_id in parent_ids if sample_id in sample_results
+            raise ValueError("cached subrequest differs from exact planned batch context")
+        seen.add(fingerprint)
+        response = record.get("response")
+        if not isinstance(response, dict) or "execution_batches" in response:
+            raise ValueError("cached child response is invalid")
+        validate_response(child, response)
+        if record.get("endpoint_image_digest") != request["runtime"]["configured_image_digest"]:
+            raise ValueError("cached subresponse image identity differs from requested runtime")
+        for sample in response["samples"]:
+            if sample["sample_id"] in results:
+                raise ValueError("cached subresponses duplicate a sample")
+            results[sample["sample_id"]] = sample
+    return results, [
+        results[sample["sample_id"]]
+        for sample in request["samples"]
+        if sample["sample_id"] in results
     ]
+
+
+def _merged_payload(request, subresponses, ordered_samples):
+    response = copy.deepcopy(subresponses[0]["response"])
+    response.update(
+        request_id=request["request_id"],
+        request_sha256=sha256_json(request),
+        run_id=request["run_id"],
+        window_index=request["window_index"],
+        samples=ordered_samples,
+        latency_seconds=sum(part["response"]["latency_seconds"] for part in subresponses),
+        execution_batches=copy.deepcopy(subresponses),
+    )
+    # Never claim concatenated child outputs were computed in the parent batch.
+    response.pop("batch_context_sha256")
+    return response
 
 
 def merge_subresponses(
     request: dict[str, Any], subresponses: list[dict[str, Any]]
 ) -> dict[str, Any] | None:
-    """Assemble a parent response only when validated child outputs cover it exactly."""
-    sample_results, ordered_samples = _validate_subresponses(request, subresponses)
-    expected_ids = [sample["sample_id"] for sample in request["samples"]]
-    if len(sample_results) != len(expected_ids):
+    """Return a host aggregate retaining every exact executed child batch."""
+    results, ordered = _validate_subresponses(request, subresponses)
+    if len(results) != len(request["samples"]):
         return None
-    response = copy.deepcopy(subresponses[0]["response"])
-    response["request_id"] = request["request_id"]
-    response["run_id"] = request["run_id"]
-    response["window_index"] = request["window_index"]
-    response["samples"] = ordered_samples
-    validate_response(request, response)
-    return response
+    return _merged_payload(request, subresponses, ordered)
+
+
+def _finite(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def validate_response(request: dict[str, Any], response: dict[str, Any]) -> None:
-    """Reject mismatched provenance, scores, or unaligned attributions."""
-    for field in ("schema_version", "request_id", "run_id", "window_index"):
+    """Independently reconstruct scores, fixed targets and completeness."""
+    if request.get("schema_version") != "2":
+        raise ValueError("schema 1 candidate-logit caches are historical pilot artifacts only")
+    if "execution_batches" in response:
+        parts = response["execution_batches"]
+        if not isinstance(parts, list):
+            raise ValueError("host aggregate execution batches are invalid")
+        results, ordered = _validate_subresponses(request, parts)
+        if len(results) != len(request["samples"]) or response != _merged_payload(
+            request, parts, ordered
+        ):
+            raise ValueError("host aggregate differs from exact executed child batches")
+        return
+    for field in (
+        "schema_version",
+        "request_id",
+        "run_id",
+        "window_index",
+        "model",
+        "tokenizer",
+        "runtime",
+        "decision_target",
+        "precision",
+        "tokenization",
+        "pooling",
+    ):
         if response.get(field) != request[field]:
             raise ValueError(f"endpoint response {field} does not match the request")
-    for field in ("model", "tokenizer"):
-        if response.get(field) != request[field]:
-            raise ValueError(f"endpoint response {field} revision does not match the request")
-    if response.get("score_semantics") != "choice_probability":
+    if response.get("request_sha256") != sha256_json(request):
+        raise ValueError("endpoint exact request fingerprint differs")
+    if response.get("batch_context_sha256") != sha256_json(request["samples"]):
+        raise ValueError("endpoint execution batch context differs")
+    if response.get("score_semantics") != "temperature_scaled_choice_probability":
         raise ValueError("endpoint response has unexpected score semantics")
-
+    if not _finite(response.get("latency_seconds")) or response["latency_seconds"] < 0:
+        raise ValueError("endpoint response latency is invalid")
     candidate_ids = [candidate["candidate_id"] for candidate in request["candidates"]]
-    requested_samples = request["samples"]
-    returned_samples = response.get("samples")
-    if not isinstance(returned_samples, list) or len(returned_samples) != len(requested_samples):
+    returned = response.get("samples")
+    if not isinstance(returned, list) or len(returned) != len(request["samples"]):
         raise ValueError("endpoint response sample count does not match the request")
-
-    attribution_plan = request.get("attribution")
-    for expected, actual in zip(requested_samples, returned_samples, strict=True):
+    target = request["decision_target"]
+    for expected, actual in zip(request["samples"], returned, strict=True):
         sample_id = expected["sample_id"]
-        if actual.get("sample_id") != sample_id:
+        if not isinstance(actual, dict) or actual.get("sample_id") != sample_id:
             raise ValueError(f"endpoint response sample order differs at {sample_id}")
         scores = actual.get("scores")
-        if not isinstance(scores, list):
-            raise ValueError(f"endpoint scores are invalid for {sample_id}")
+        if not isinstance(scores, list) or not all(isinstance(score, dict) for score in scores):
+            raise ValueError("endpoint scores are invalid")
         if [score.get("candidate_id") for score in scores] != candidate_ids:
             raise ValueError(f"endpoint score order differs for {sample_id}")
+        logits = [score.get("logit") for score in scores]
         probabilities = [score.get("probability") for score in scores]
+        temperature = actual.get("probability_temperature")
+        if (
+            not all(_finite(value) for value in logits)
+            or not _finite(temperature)
+            or temperature <= 0
+        ):
+            raise ValueError("endpoint logits or temperature are invalid")
+        if any(not _finite(value) or not 0 <= value <= 1 for value in probabilities):
+            raise ValueError("endpoint probability is invalid")
+        if not math.isclose(math.fsum(probabilities), 1.0, abs_tol=2e-6):
+            raise ValueError("endpoint probabilities do not sum to one")
+        maximum = max(logits)
+        exponential = [math.exp((value - maximum) / temperature) for value in logits]
+        denominator = math.fsum(exponential)
         if any(
-            not isinstance(value, int | float)
-            or not math.isfinite(value)
-            or not 0.0 <= value <= 1.0
-            for value in probabilities
+            not math.isclose(p, z / denominator, abs_tol=2e-6, rel_tol=2e-5)
+            for p, z in zip(probabilities, exponential, strict=True)
         ):
-            raise ValueError(f"endpoint returned an invalid probability for {sample_id}")
-        if not math.isclose(sum(probabilities), 1.0, rel_tol=0.0, abs_tol=0.0001 * len(scores)):
-            raise ValueError(f"endpoint probabilities do not sum to one for {sample_id}")
-        if actual.get("predicted_candidate_id") not in candidate_ids:
-            raise ValueError(f"endpoint prediction is not a supplied candidate for {sample_id}")
+            raise ValueError("endpoint probabilities differ from saved forward logits")
+        predicted = candidate_ids[max(range(len(logits)), key=logits.__getitem__)]
+        if actual.get("predicted_candidate_id") != predicted:
+            raise ValueError("endpoint prediction differs from saved forward logits")
+        margin = (
+            logits[candidate_ids.index(target["target_candidate_id"])]
+            - logits[candidate_ids.index(target["reference_candidate_id"])]
+        )
+        if not _finite(actual.get("target_value")) or not math.isclose(
+            actual["target_value"], margin, rel_tol=1e-5, abs_tol=1e-5
+        ):
+            raise ValueError("endpoint fixed target differs from saved forward logits")
 
-        attribution = actual.get("attribution")
-        if attribution_plan is None:
-            if attribution is not None:
-                raise ValueError(f"unexpected endpoint attribution for {sample_id}")
-            continue
-        if not isinstance(attribution, dict):
-            raise ValueError(f"endpoint omitted requested attribution for {sample_id}")
-        if (
-            attribution.get("method") != attribution_plan["method"]
-            or attribution.get("target_candidate_id") != attribution_plan["target_candidate_id"]
-            or attribution.get("target_semantics") != "candidate_logit"
+        tokens = actual.get("tokens")
+        if not isinstance(tokens, dict):
+            raise ValueError("endpoint omitted token metadata")
+        width = tokens.get("token_width")
+        if isinstance(width, bool) or not isinstance(width, int) or not 1 <= width <= 8192:
+            raise ValueError("endpoint token width is invalid")
+        for field in ("token_ids", "tokens", "segments"):
+            if not isinstance(tokens.get(field), list) or len(tokens[field]) != width:
+                raise ValueError("endpoint token arrays are misaligned")
+        if any(
+            not isinstance(value, int) or isinstance(value, bool) for value in tokens["token_ids"]
         ):
-            raise ValueError(f"endpoint attribution target differs for {sample_id}")
-
-        n_steps = attribution.get("n_steps")
-        if (
-            not isinstance(n_steps, int)
-            or isinstance(n_steps, bool)
-            or not 2 <= n_steps <= MAX_IG_COMPUTE_STEPS
+            raise ValueError("endpoint token IDs are invalid")
+        if any(
+            not isinstance(value, str)
+            for field in ("tokens", "segments")
+            for value in tokens[field]
         ):
-            raise ValueError(f"endpoint IG evaluation count is invalid for {sample_id}")
-
-        width = attribution.get("token_width")
-        aligned = ("token_ids", "tokens", "segments", "values")
-        if not isinstance(width, int) or any(
-            not isinstance(attribution.get(field), list) or len(attribution[field]) != width
-            for field in aligned
-        ):
-            raise ValueError(f"endpoint attribution arrays are misaligned for {sample_id}")
-        values = attribution["values"]
-        if any(not isinstance(value, int | float) or not math.isfinite(value) for value in values):
-            raise ValueError(f"endpoint attribution contains a non-finite value for {sample_id}")
-        completeness_delta = attribution.get("completeness_delta")
-        if not isinstance(completeness_delta, int | float) or not math.isfinite(completeness_delta):
-            raise ValueError(f"endpoint completeness residual is invalid for {sample_id}")
-
-        start = attribution.get("state_token_start")
-        count = attribution.get("state_token_count")
-        total = attribution.get("state_tokens_total")
-        dropped = attribution.get("state_tokens_dropped")
-        if (
-            not isinstance(start, int)
-            or not isinstance(count, int)
-            or not isinstance(total, int)
-            or not isinstance(dropped, int)
-        ):
-            raise ValueError(f"endpoint token counts are invalid for {sample_id}")
+            raise ValueError("endpoint token strings or segments are invalid")
+        counts = [
+            tokens.get(field)
+            for field in (
+                "state_token_start",
+                "state_token_count",
+                "state_tokens_total",
+                "state_tokens_dropped",
+            )
+        ]
+        if any(not isinstance(value, int) or isinstance(value, bool) for value in counts):
+            raise ValueError("endpoint token counts are invalid")
+        start, count, total, dropped = counts
         end = start + count
         if start < 0 or count < 0 or end > width or total < count or dropped != total - count:
-            raise ValueError(f"endpoint token span or truncation count is invalid for {sample_id}")
-        if attribution["segments"][start:end] != ["document"] * count:
-            raise ValueError(f"endpoint document span is misaligned for {sample_id}")
-        estimated_logit_delta = sum(values[start:end]) + completeness_delta
-        tolerance = COMPLETENESS_ATOL + COMPLETENESS_RTOL * abs(estimated_logit_delta)
-        if abs(completeness_delta) > tolerance + 1e-6:
-            raise ValueError(
-                f"endpoint completeness residual exceeds the qualified gate for {sample_id}"
-            )
+            raise ValueError("endpoint token span or truncation count is invalid")
+        if [i for i, segment in enumerate(tokens["segments"]) if segment == "document"] != list(
+            range(start, end)
+        ):
+            raise ValueError("endpoint document span is misaligned")
+        representation = actual.get("representation")
+        if request.get("representations", False):
+            if (
+                not isinstance(representation, dict)
+                or representation.get("pooling") != request["pooling"]
+                or count == 0
+                or not isinstance(representation.get("values"), list)
+                or not representation["values"]
+                or not all(_finite(v) for v in representation["values"])
+            ):
+                raise ValueError("endpoint requested document representation is invalid")
+        elif representation is not None:
+            raise ValueError("endpoint returned an unrequested representation")
+
+        signal = actual.get("attribution")
+        plan = request.get("attribution")
+        if plan is None:
+            if signal is not None:
+                raise ValueError("endpoint returned an unrequested attribution")
+            continue
+        if not isinstance(signal, dict) or any(
+            signal.get(key) != value for key, value in target.items()
+        ):
+            raise ValueError("endpoint attribution target differs")
+        if (
+            signal.get("method") != plan["method"]
+            or signal.get("baseline") != "pad_document_tokens"
+        ):
+            raise ValueError("endpoint attribution function or baseline differs")
+        evaluations = signal.get("gradient_evaluations")
+        if (
+            not isinstance(evaluations, int)
+            or isinstance(evaluations, bool)
+            or not 2 <= evaluations <= MAX_IG_COMPUTE_STEPS
+            or signal.get("n_steps_requested") != plan.get("n_steps", 64)
+        ):
+            raise ValueError("endpoint IG evaluation count is invalid")
+        values = signal.get("values")
+        if not isinstance(values, list) or len(values) != width:
+            raise ValueError("endpoint attribution arrays are misaligned")
+        if not all(_finite(value) for value in values):
+            raise ValueError("endpoint attribution contains non-finite values")
+        if any(value != 0.0 for value in values[:start] + values[end:]):
+            raise ValueError("endpoint attribution changed non-document baseline positions")
+        input_value = signal.get("input_target_value")
+        baseline_value = signal.get("baseline_target_value")
+        residual = signal.get("completeness_delta")
+        if not all(_finite(value) for value in (input_value, baseline_value, residual)):
+            raise ValueError("endpoint saved completeness quantities are invalid")
+        if not math.isclose(input_value, actual["target_value"], rel_tol=1e-6, abs_tol=1e-6):
+            raise ValueError("endpoint IG input and scoring forward quantities differ")
+        delta = input_value - baseline_value
+        recalculated = delta - math.fsum(values[start:end])
+        if not math.isclose(residual, recalculated, abs_tol=1e-6, rel_tol=1e-6):
+            raise ValueError("endpoint saved quantities do not reproduce completeness residual")
+        tolerance = COMPLETENESS_ATOL + COMPLETENESS_RTOL * abs(delta)
+        if abs(recalculated) > tolerance + 1e-6:
+            raise ValueError("endpoint completeness residual exceeds the implementation gate")
 
 
 def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:

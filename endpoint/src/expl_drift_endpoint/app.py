@@ -27,7 +27,7 @@ def create_app(adapter_factory: Callable[[], Any] | None = None) -> FastAPI:
 
     application = FastAPI(
         title="expl_drift extraction endpoint",
-        version="0.2.0",
+        version="2.0.0",
         lifespan=lifespan,
     )
 
@@ -47,8 +47,9 @@ def create_app(adapter_factory: Callable[[], Any] | None = None) -> FastAPI:
             status="ready",
             reason=None,
             extraction_available=True,
-            capabilities=["decision_scores", "integrated_gradients"],
+            capabilities=adapter.capabilities,
             model=adapter.model_revision,
+            runtime=adapter.runtime,
         )
 
     @application.post("/extract", response_model=ExtractionResponse)

@@ -1,18 +1,17 @@
-"""Run a small, host-orchestrated drift experiment against the remote Laya endpoint."""
+"""Run a development-only legacy schedule with the version 2 Laya signal contract."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import hashlib
-import io
 import json
 import os
 import random
 import re
 import subprocess
 import sys
-import zipfile
+import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
@@ -71,12 +70,12 @@ CALIBRATED_WINDOW_CLASS_COUNTS = [
 ]
 EXPERIMENT_PROFILES = {
     "pilot": {
-        "run_id": "laya-youtube-spam-seed-42",
+        "run_id": "laya-youtube-spam-margin-v2-seed-42",
         "window_class_counts": WINDOW_CLASS_COUNTS,
         "calibration_windows": CALIBRATION_WINDOWS,
     },
     "calibrated": {
-        "run_id": "laya-youtube-spam-calibrated-seed-42",
+        "run_id": "laya-youtube-spam-calibrated-margin-v2-seed-42",
         "window_class_counts": CALIBRATED_WINDOW_CLASS_COUNTS,
         "calibration_windows": 4,
     },
@@ -92,61 +91,14 @@ def _git_revision(repository: Path) -> str:
     ).stdout.strip()
 
 
-def _merge_resume_provenance(
-    previous: dict[str, Any],
-    current: dict[str, Any],
-    *,
-    resume_from_image_digest: str | None,
-) -> tuple[dict[str, Any], str | None]:
-    """Track every runtime/code revision used across an explicitly resumed run."""
-    previous_endpoint = previous["endpoint"]
-    current_endpoint = current["endpoint"]
-    previous_image = previous_endpoint["image_digest"]
-    current_image = current_endpoint["image_digest"]
-    image_digests = list(previous_endpoint.get("image_digests", [previous_image]))
-    if current_image not in image_digests:
-        if resume_from_image_digest != previous_image:
-            raise ValueError(
-                "endpoint image changed; set LAYA_RESUME_PREVIOUS_IMAGE_DIGEST "
-                "to the image recorded in the existing provenance to resume"
-            )
-        image_digests.append(current_image)
-
-    def without_execution_revisions(value: dict[str, Any]) -> dict[str, Any]:
-        normalized = json.loads(json.dumps(value))
-        for field in ("image_digest", "image_digests", "legacy_cache_image_digest"):
-            normalized["endpoint"].pop(field, None)
-        normalized["experiment"].pop("endpoint_request_batch_sizes", None)
-        for field in ("expl_drift_experiments", "experiment_code_revisions"):
-            normalized["revisions"].pop(field, None)
-        return normalized
-
-    if without_execution_revisions(previous) != without_execution_revisions(current):
-        raise ValueError("output directory provenance differs; choose a fresh output directory")
-
-    previous_revisions = previous["revisions"]
-    current_revisions = current["revisions"]
-    code_revisions = previous_revisions.get(
-        "experiment_code_revisions", [previous_revisions["expl_drift_experiments"]]
-    )
-    code_revisions = list(
-        dict.fromkeys([*code_revisions, *current_revisions["experiment_code_revisions"]])
-    )
-    previous_batch_sizes = previous["experiment"].get(
-        "endpoint_request_batch_sizes", [MAX_BATCH_SAMPLES]
-    )
-    current["experiment"]["endpoint_request_batch_sizes"] = list(
-        dict.fromkeys(
-            [*previous_batch_sizes, *current["experiment"]["endpoint_request_batch_sizes"]]
+def _merge_resume_provenance(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    """New artifacts never continue across changed runtime, image, source or batches."""
+    if previous != current:
+        raise ValueError(
+            "output directory provenance differs; mixed-runtime resume is prohibited; "
+            "choose a fresh output directory"
         )
-    )
-    current_endpoint["image_digests"] = image_digests
-    legacy_cache_image_digest = previous_endpoint.get("legacy_cache_image_digest", previous_image)
-    if len(image_digests) > 1 or "legacy_cache_image_digest" in previous_endpoint:
-        current_endpoint["legacy_cache_image_digest"] = legacy_cache_image_digest
-    current_revisions["expl_drift_experiments"] = code_revisions[0]
-    current_revisions["experiment_code_revisions"] = code_revisions
-    return current, legacy_cache_image_digest
+    return current
 
 
 def _load_dataset() -> tuple[bytes, list[dict[str, Any]]]:
@@ -156,27 +108,19 @@ def _load_dataset() -> tuple[bytes, list[dict[str, Any]]]:
     if digest != DATASET_SHA256:
         raise RuntimeError(f"UCI dataset SHA-256 changed: expected {DATASET_SHA256}, got {digest}")
 
-    records = []
-    with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
-        for filename in sorted(bundle.namelist()):
-            if not filename.endswith(".csv") or filename.startswith("__MACOSX/"):
-                continue
-            video = Path(filename).stem
-            with bundle.open(filename) as raw:
-                rows = csv.DictReader(io.TextIOWrapper(raw, encoding="latin-1"))
-                for row in rows:
-                    text = row["CONTENT"].strip()
-                    label = int(row["CLASS"])
-                    if text and label in (0, 1):
-                        records.append(
-                            {
-                                "sample_id": f"{video}-{row['COMMENT_ID']}",
-                                "text": text,
-                                "label": label,
-                            }
-                        )
-    if len(records) != 1956:
-        raise RuntimeError(f"Expected 1956 UCI comments, found {len(records)}")
+    from experiments.research_extension.data import load_youtube_archive
+
+    with tempfile.NamedTemporaryFile(suffix=".zip") as stream:
+        stream.write(archive)
+        stream.flush()
+        inventory = load_youtube_archive(stream.name)
+    records = [
+        {
+            "sample_id": row.source_id, "group_id": row.group_id, "video": row.video,
+            "text": row.text, "label": row.label,
+        }
+        for row in inventory.eligible_records
+    ]
     return archive, records
 
 
@@ -185,7 +129,17 @@ def _create_windows(
     class_counts: list[dict[int, int]] | None = None,
 ) -> list[list[dict[str, Any]]]:
     rng = random.Random(SEED)
-    by_label = {label: [row for row in records if row["label"] == label] for label in (0, 1)}
+    # Development profiles select one source representative per declared group.
+    # Primary schedules use the complete whole-group role allocator instead.
+    representatives = {}
+    for row in sorted(records, key=lambda row: row["sample_id"]):
+        prior = representatives.setdefault(row["group_id"], row)
+        if prior["label"] != row["label"]:
+            raise ValueError("development records contain a conflicting-label group")
+    by_label = {
+        label: [row for row in representatives.values() if row["label"] == label]
+        for label in (0, 1)
+    }
     for pool in by_label.values():
         rng.shuffle(pool)
     offsets = {0: 0, 1: 0}
@@ -221,12 +175,13 @@ def _request_for_window(
     *,
     chunk_index: int = 0,
     chunk_count: int = 1,
+    runtime: dict[str, Any],
 ) -> dict[str, Any]:
     endpoint_samples = [{"sample_id": row["sample_id"], "text": row["text"]} for row in samples]
     corpus_fingerprint = sha256_json(endpoint_samples)
     chunk_tag = f"-b{chunk_index}" if chunk_count > 1 else ""
     return {
-        "schema_version": "1",
+        "schema_version": "2",
         "request_id": f"{run_id}-w{window_index}{chunk_tag}-{corpus_fingerprint[:12]}",
         "run_id": run_id,
         "window_index": window_index,
@@ -237,12 +192,17 @@ def _request_for_window(
         "candidates": CANDIDATES,
         "samples": endpoint_samples,
         "max_tokens": MAX_TOKENS,
-        "attribution": {
-            "method": "integrated_gradients",
+        "decision_target": {
+            "target_semantics": "fixed_candidate_margin",
             "target_candidate_id": "spam",
-            "n_steps": 64,
+            "reference_candidate_id": "ham",
         },
-        "representations": False,
+        "precision": "float32_no_autocast",
+        "tokenization": "laya_sdk_0.3.29_encode_state",
+        "pooling": "document_mean_last_hidden_state",
+        "runtime": runtime,
+        "attribution": {"method": "integrated_gradients", "n_steps": 64},
+        "representations": True,
     }
 
 
@@ -286,8 +246,18 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
     windows = _create_windows(records, window_class_counts)
     dataset_fingerprint = hashlib.sha256(archive).hexdigest()
     experiment_revision = _git_revision(root)
+    client = EndpointClient(endpoint_url, token)
+    health = client.health()
+    if health.get("schema_version") != "2" or health.get("model") != MODEL:
+        raise RuntimeError("endpoint health reports a different schema or model revision")
+    runtime = health.get("runtime")
+    if not isinstance(runtime, dict) or runtime.get("configured_image_digest") != image_digest:
+        raise RuntimeError("endpoint configured image differs from requested immutable image")
+    required = {"integrated_gradients", "fixed_candidate_margin", "document_mean_representation"}
+    if not required.issubset(set(health.get("capabilities", []))):
+        raise RuntimeError("endpoint health omits required implemented signals")
     provenance = {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": run_id,
         "dataset": {
             "name": "UCI YouTube Spam Collection",
@@ -298,6 +268,11 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
             "records": len(records),
             "training_mix_overlap": "not verifiable; Laya's full training mix is undisclosed",
             "published_laya_benchmarks_overlap": "not listed in the pinned model card",
+            "schedule_semantics": (
+                "development-only legacy profile counts; one source per duplicate/template "
+                "group, not the frozen seven-role primary allocation"
+            ),
+            "decoding": "strict UTF-8; exact source CONTENT; corrected inventory loader",
         },
         "model": MODEL,
         "tokenizer": MODEL,
@@ -305,6 +280,7 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
             "url": endpoint_url,
             "image_digest": image_digest,
             "image_digests": [image_digest],
+            "runtime": runtime,
         },
         "revisions": {
             "expl_drift_experiments": experiment_revision,
@@ -324,7 +300,7 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
             ],
             "max_tokens": MAX_TOKENS,
             "endpoint_request_batch_sizes": [MAX_ENDPOINT_REQUEST_SAMPLES],
-            "attribution": "integrated_gradients target=spam candidate_logit n_steps=64",
+            "attribution": "integrated_gradients fixed spam-minus-ham margin n_steps_requested=64",
             "drift_injection": (
                 "synthetic class-prior shift by deterministic sampling without replacement"
             ),
@@ -337,26 +313,11 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "provenance.json"
-    legacy_cache_image_digest = None
     if manifest_path.exists():
         previous = json.loads(manifest_path.read_text(encoding="utf-8"))
-        provenance, legacy_cache_image_digest = _merge_resume_provenance(
-            previous,
-            provenance,
-            resume_from_image_digest=os.environ.get("LAYA_RESUME_PREVIOUS_IMAGE_DIGEST"),
-        )
-        if previous != provenance:
-            atomic_write_json(manifest_path, provenance)
+        _merge_resume_provenance(previous, provenance)
     else:
         atomic_write_json(manifest_path, provenance)
-
-    client = EndpointClient(endpoint_url, token)
-    health = client.health()
-    if health.get("model") != MODEL:
-        raise RuntimeError("endpoint health reports a different model revision")
-    if "integrated_gradients" not in health.get("capabilities", []):
-        raise RuntimeError("endpoint health does not advertise integrated_gradients")
-
     responses = []
     cache_dir = output_dir / "windows"
     cache_image_digests = set()
@@ -370,6 +331,7 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
                 chunk,
                 chunk_index=chunk_index,
                 chunk_count=len(chunks),
+                runtime=runtime,
             )
             cache_path = (
                 cache_dir / f"window-{window_index:02d}.json"
@@ -377,46 +339,19 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
                 else cache_dir / f"window-{window_index:02d}-chunk-{chunk_index:02d}.json"
             )
             expected_labels = {row["sample_id"]: row["label"] for row in chunk}
-            cache_image_digest = image_digest
             if cache_path.exists():
                 cached_entry = json.loads(cache_path.read_text(encoding="utf-8"))
                 if cached_entry.get("labels") != expected_labels:
                     raise ValueError(f"cached labels differ for window {window_index}")
-                if "endpoint_image_digests" in cached_entry:
-                    cached_digests = cached_entry["endpoint_image_digests"]
-                    if not isinstance(cached_digests, list):
+                if "subresponses" in cached_entry:
+                    digests = cached_entry.get("endpoint_image_digests")
+                    if digests != [image_digest]:
                         raise ValueError(
-                            f"cache {cache_path} has invalid endpoint image provenance"
+                            "cached endpoint image differs; mixed-image resume prohibited"
                         )
-                    subresponses = cached_entry.get("subresponses", [])
-                    if not isinstance(subresponses, list):
-                        raise ValueError(f"cache {cache_path} has invalid subresponses")
-                    subrequest_digests = {
-                        part.get("endpoint_image_digest")
-                        for part in subresponses
-                        if isinstance(part, dict)
-                    }
-                    if not subrequest_digests.issubset(set(cached_digests)):
-                        raise ValueError(f"cache {cache_path} omits a subrequest image digest")
-                    for cached_digest in cached_digests:
-                        if cached_digest not in provenance["endpoint"]["image_digests"]:
-                            raise ValueError(
-                                f"cache {cache_path} references an unrecorded endpoint image"
-                            )
-                        cache_image_digests.add(cached_digest)
-                else:
-                    cache_image_digest = cached_entry.get("endpoint_image_digest")
-                    if cache_image_digest is None:
-                        cache_image_digest = legacy_cache_image_digest
-                        if cache_image_digest is None:
-                            raise ValueError(f"cache {cache_path} has no endpoint image provenance")
-                        cached_entry["endpoint_image_digest"] = cache_image_digest
-                        atomic_write_json(cache_path, cached_entry)
-                    if cache_image_digest not in provenance["endpoint"]["image_digests"]:
-                        raise ValueError(
-                            f"cache {cache_path} references an unrecorded endpoint image"
-                        )
-                    cache_image_digests.add(cache_image_digest)
+                elif cached_entry.get("endpoint_image_digest") != image_digest:
+                    raise ValueError("cached endpoint image differs; mixed-image resume prohibited")
+                cache_image_digests.add(image_digest)
             response = load_cached_response(cache_path, request)
             if response is None:
                 print(
@@ -505,7 +440,20 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
         np.asarray([sample["attribution"]["values"] for sample in response["samples"]], dtype=float)
         for response in responses
     ]
-    summaries = [summarize_attributions(values) for values in raw_attributions]
+    document_masks = [
+        np.asarray([
+            [segment == "document" and
+             sample["tokens"]["state_token_start"] <= index <
+             sample["tokens"]["state_token_start"] + sample["tokens"]["state_token_count"]
+             for index, segment in enumerate(sample["tokens"]["segments"])]
+            for sample in response["samples"]
+        ], dtype=bool)
+        for response in responses
+    ]
+    summaries = [
+        summarize_attributions(values, document_mask=mask)
+        for values, mask in zip(raw_attributions, document_masks, strict=True)
+    ]
     detector = DriftDetector(summaries[0])
     monitor = DriftMonitor(
         detector,
@@ -579,7 +527,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=sorted(EXPERIMENT_PROFILES), default="pilot")
     args = parser.parse_args()
-    default_output = f"results/laya-youtube-spam-{args.profile}"
+    default_output = f"results/laya-youtube-spam-{args.profile}-margin-v2-development"
     output = Path(os.environ.get("LAYA_EXPERIMENT_OUTPUT", default_output))
     result = run(output, profile=args.profile)
     print(json.dumps(result["summary"], sort_keys=True))

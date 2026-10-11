@@ -72,31 +72,97 @@ Archived CUSUM/EWMA lead-time experiments are retained only as offline reference
   - `results/runs/stats_20260223_152707/figures/seed_case_studies/case_study_seed_selection.csv`
 - Do not replace case-study seeds manually after viewing figures; selection must remain tied to the recorded CSV.
 
-## Remote Laya Experiment
+## Research extension development
 
-The host-side runner sends batches to a private Hugging Face Inference Endpoint; it does not load Laya locally. It pins the base model revision and UCI YouTube Spam Collection archive checksum, validates every response before caching, and resumes only when cached request fingerprints match.
+Active work is on `codex/research-extension`; the
+[execution plan](../expl_drift/docs/research-extension-plan-2026-10-11.md) defines
+G1–G5. No primary results, frozen protocol, new deployment or paid extraction
+are established by the development checks.
 
-Configure the endpoint with an immutable model-runtime image implementing
-`decision_scores` and `integrated_gradients`. Health capabilities indicate
-implementation availability only, not scientific qualification.
-
-Install the experiment dependencies from this repository's existing `requirements.txt` in the host Python environment; this installs analysis dependencies, not Laya or its model weights.
+### Corrected corpus and immutable schedules
 
 ```bash
-python -m pip install -r requirements.txt
+python -m experiments.research_extension.data --download \
+  --output results/research-extension-data
+```
+
+The CPU-only command verifies the archive pin, strictly decodes UTF-8, preserves
+exact source CONTENT, and writes inventories, source-ID/exact-text/template
+links, exclusions, label/video counts, hashes, and provisional feasibility.
+Source video is a retained grouping variable, not a video-disjoint holdout.
+Role allocation requires all seven roles, including development, with explicit
+counts and optional binary class counts. `schedule.allocate_roles` and
+`schedule.build_schedule` allocate whole groups exactly or report infeasibility;
+they never silently downsize, split incompatible roles, or repeat a group across
+windows. Paired controls explicitly declare shared membership and transformations.
+
+For saved role/window request JSON:
+
+```bash
+python -m experiments.research_extension.data --download \
+  --output results/research-extension-data \
+  --requests results/research-extension-data/role-requests.json \
+  --windows results/research-extension-data/window-requests.json \
+  --schedule-id youtube-candidate-design-seed42 --seed 42
+```
+
+Existing files are accepted only when identical; incompatible replacement fails.
+The saved candidate design is not G2 freeze or null-budget qualification. Raw
+inventories/schedules live under the ignored artifact directory, not in Git.
+
+### Reference classifier development qualification
+
+`ReferenceAdapter` loads only local BERT/GPT-2 task checkpoints and hashes their
+files. It explains every fixed non-reference candidate margin, stores signed
+document-only IG, complete forward quantities, logits/probabilities, token
+metadata/truncation, last-layer document-mean embeddings, cost and runtime.
+GPT-2's classifier token index is fixed from the original IDs throughout IG;
+embedding-only default padding inference measures a different classifier.
+
+```bash
+python -m experiments.research_extension.qualification \
+  --checkpoint /path/to/task-checkpoint \
+  --development-json /path/to/designated-development.json \
+  --output /path/to/fresh-qualification-run --device cuda
+```
+
+The JSON supplies `role: "development"`, ordered `samples` with `sample_id`/`text`,
+and `task` with ordered `candidate_ids`/`reference_candidate_id`. The command
+saves tolerances before extraction, executes repeated batch sizes 1/4/8, and
+saves exact banks plus a numerical/cost report. It refuses held-out roles and
+already extracted destinations. Passing these examples alone does not pass G1.
+Model extras and the separately installed endpoint numerical package are needed;
+this is not the later installed-package/G5 cutover.
+
+## Remote Laya development and historical pilots
+
+The active host runner uses [endpoint schema 2](endpoint/README.md): fixed
+spam-minus-ham margins, unrounded temperature-scaled probabilities, document
+representations, exact runtime/batch fingerprints, and independently
+recalculable completeness. The data path now uses the corrected inventory and
+one representative per duplicate/template group. Its legacy window-count
+profiles remain development-only, not the seven-role primary study.
+
+Configure a separately approved immutable schema-2 model-runtime image:
+
+```bash
 export LAYA_ENDPOINT_URL="https://<endpoint-url>"
 export LAYA_ENDPOINT_IMAGE_DIGEST="sha256:<published-image-digest>"
 export HF_TOKEN="<read token for the private endpoint>"
-export LAYA_EXPERIMENT_OUTPUT="results/laya-youtube-spam-adaptive"
-python -m experiments.laya_endpoint.runner
+export LAYA_EXPERIMENT_OUTPUT="results/laya-youtube-spam-pilot-margin-v2-development"
+python -m experiments.laya_endpoint.runner --profile pilot
 ```
 
-For the first run, outputs and validated resumable window caches are under
-`results/laya-youtube-spam-adaptive/`. The manifest records the model revision,
-endpoint image digest, UCI archive SHA-256, experiment revision, and core-library
-revision. `LAYA_EXPERIMENT_OUTPUT` can select a different destination.
+Capabilities report implementation availability, not qualification. Changed
+runtime, image, source, text, target or batch context cannot resume a run.
+No deployment or remote extraction has been performed for schema 2.
 
-This is a 24-example smoke experiment with a deterministic class-prior shift,
+The following results are historical schema-1 candidate-logit pilots using the
+old text/sampling/metric definitions, not corrected margin evidence.
+Their original files remain in `results/laya-youtube-spam-adaptive/` and
+`results/laya-youtube-spam-calibrated/`; the new runner rejects those caches.
+
+The historical 24-example smoke used a deterministic class-prior shift,
 not a direct BERT/GPT comparison. The detector returned no alert in the shifted
 windows:
 
@@ -131,19 +197,20 @@ With natural-log entropy, JSD is bounded by `ln(2) ≈ 0.693147`. The pilot's
 JSD warning threshold is above that ceiling, so that metric could not fire in
 this run. Calibration used only two four-example windows.
 
-The `calibrated` profile keeps the same model, prompt, target, dataset, and
-detector, with 100 samples in each of ten windows: one baseline, four
-calibration windows, then five windows with spam prevalence rising from 60% to
-100%. Samples are disjoint across windows. Parent chunks are cached in batches of
-up to 32; larger chunks are split into separately fingerprinted, resumable
-endpoint calls of at most 8 samples. Provenance records all request batch sizes.
+The historical `calibrated` profile used 100 samples in each of ten windows:
+one baseline, four calibration windows, then spam prevalence rising from 60%
+to 100%. Row disjointness did not establish duplicate/template disjointness.
+The partial cache mixed images and used Latin-1-transformed inputs; preserve it
+as historical, never resume it as corrected evidence.
 
 During this run, HF's scale-to-zero timeout was temporarily raised from 15 to
 60 minutes after the endpoint scaled down during a long extraction request.
 Minimum replicas remain zero; restore the timeout to 15 minutes after the run.
 
+For a new development-only schema-2 run, use a fresh destination:
+
 ```bash
-LAYA_EXPERIMENT_OUTPUT="results/laya-youtube-spam-calibrated" \
+LAYA_EXPERIMENT_OUTPUT="results/laya-youtube-spam-calibrated-margin-v2-development" \
   python -m experiments.laya_endpoint.runner --profile calibrated
 ```
 

@@ -3,8 +3,9 @@
 The endpoint has a CPU-only validation image and a separate Laya model image.
 The model image loads the pinned English base Laya checkpoint from HF's
 `/repository` mount and serves decision scores through `/extract`. It also has an
-Integrated Gradients path for candidate-logit attribution. Health capabilities
-report implemented paths, not scientific qualification. Endpoint qualification
+Integrated Gradients path for fixed candidate-minus-reference logit margins.
+Health capabilities report implemented paths, not scientific qualification.
+Endpoint qualification
 checks focus on whether the declared generation-time score, attribution target,
 and token alignment are measured; they do not judge Laya's general correctness.
 
@@ -24,9 +25,9 @@ rtk uv run --locked ruff format --check src tests scripts
 rtk uv run --locked uvicorn expl_drift_endpoint.app:app --host 127.0.0.1 --port 8000
 ```
 
-The tests exercise strict input validation, score ordering/serialization, IG
-integration and token-span invariants, unsupported attribution methods, and
-readiness with a test adapter. They use synthetic data and load no model weights.
+The tests exercise strict input validation, fixed signed margins, saved-forward
+completeness, document-only pooling, exact cache/runtime identity, HTTP errors,
+and adaptive integration. They use CPU numerical fixtures, not task checkpoints.
 
 ## Container checks
 
@@ -76,48 +77,62 @@ responses. It does not exercise Laya or qualify the model-runtime image.
 
 ## Input contract
 
-Schema version `1` accepts one instruction and ordered candidate set for a batch
-of samples. Each request identifies its run/window and corpus SHA-256, and pins
-model/tokenizer snapshots by full commit SHA. A separate head snapshot can be
-supplied for CLM. Optional attributions require an explicit candidate target.
+Schema version `2` accepts one instruction and ordered candidate set for an
+exact execution batch. It pins model/tokenizer snapshots, the observed `/health`
+runtime, `precision="float32_no_autocast"`,
+`tokenization="laya_sdk_0.3.29_encode_state"`, and
+`pooling="document_mean_last_hidden_state"`. `decision_target` specifies
+`target_semantics="fixed_candidate_margin"`, `target_candidate_id`, and a
+distinct `reference_candidate_id`. The target never follows the prediction.
 
-Input text is retained exactly. Duplicate sample/candidate IDs, unknown fields,
-mutable revisions, unknown attribution targets, and implicit scalar conversions
-are rejected. Current transport bounds are 32 samples, 64 candidates, and 8192
-requested tokens; these are safety limits, not claims about model capacity.
-The adapter enforces the configured checkpoint revision and the model's
-`max_len`. Revision provenance comes from deployment configuration; mounted
-checkpoint contents are not independently attested yet.
+Input text is retained exactly. Duplicate IDs, unknown fields, mutable revisions,
+unknown targets, and scalar coercions are rejected. Transport bounds remain
+32 samples, 64 candidates, and 8192 requested tokens; the adapter also enforces
+the loaded model's `max_len`.
 
-The current response schema returns each sample's predicted candidate ID and
-ordered choice probabilities with `choice_probability` semantics. Requests may
-include candidate-targeted Integrated Gradients with `candidate_logit`
-semantics. IG requests default to 64. Adaptive composite Gauss-Legendre
-integration estimates local error with 8- and 16-point rules, then bisects the
-highest-error interval until the hard completeness gate passes or 16384 evaluations.
-The response's `n_steps` field records total gradient evaluations and allows the full
-16384-evaluation integration cap. This cap was raised after one sample failed
-completeness at 8192 evaluations; the tolerance remains unchanged.
-IG is rejected unless completeness residual is at most
-`0.01 + 0.01 * abs(logit_delta)`. Token alignment, finite values, and truncation
-counts are validated in the response. Health capability advertisement indicates
-implementation availability only; it does not qualify IG.
+Every sample returns ordered raw logits, unrounded probabilities computed from
+the same forward logits and its saved SDK probability temperature, a fixed
+margin value, and aligned token/segment/truncation metadata. Requested
+representations average the encoder's last hidden state over document tokens
+only; no retained document tokens means an error, not a fabricated embedding.
+IG uses the same batch context, embedding path, raw decision head and float32
+arithmetic. It saves signed values, input/baseline target values, requested steps,
+actual gradient evaluations, and the residual:
+
+`input_target_value - baseline_target_value - sum(document_attributions)`.
+
+Adaptive 8/16-point Gauss-Legendre panels refine until the implementation gate
+`abs(residual) <= 0.01 + 0.01 * abs(input_target_value - baseline_target_value)`
+passes, or the 16384-evaluation cap fails. This is a numerical check, not a
+faithfulness or scientific qualification claim.
+
+The response fingerprints the entire canonical request and ordered batch.
+Runtime identity hashes mounted checkpoint artifacts, service source and loaded
+settings, and records SDK/Python/Torch/Transformers/device identities. Set
+`LAYA_ENDPOINT_IMAGE_DIGEST` in the service environment; it is explicitly
+`configured_not_attested`, not a cryptographically verified running image.
+The host independently recalculates probabilities, margins and completeness.
+Split requests retain each child's exact execution identity; concatenation does
+not claim that the parent batch was executed. Cache/resume rejects changed text,
+targets, precision, runtime, image, and batch context. Schema-1 candidate-logit
+and mixed-image pilot caches are preserved historical artifacts, never resumed
+as schema-2 margins.
 
 ## Current implementation status
 
 The model extra pins `laya==0.3.29`; the lock fixes its Python dependencies.
 The deployable image's model loader requires CUDA and does not fall back to CPU.
-Model weights are not downloaded or executed locally; the pinned base model runs
-on HF. The score path calls SDK `predict_batch`; IG uses the pinned SDK's private
-sequence builder/collator and substitutes input embeddings while retaining the
-decision head. It disables autocast so logits and gradients use the same
-precision path. Adaptive composite Gauss-Legendre integration bisects the
-highest-error interval until completeness passes or the 16384-evaluation cap is hit.
-The remote pilot's 24 examples passed finite-value, token-alignment, truncation,
-and hard completeness validation. Independent decision-score parity against a
-native-SDK reference remains open. That comparison is needed to claim
-equivalence to the SDK, not to observe the pinned endpoint's own outputs;
-interpret those observations as endpoint behavior, not SDK-parity evidence.
+The adapter calls the pinned SDK's actual decision model after its sequence
+builder/collator, rather than mixing rounded `predict_batch` probabilities with
+singleton logit IG. Scoring, IG forward endpoints, and document pooling now share
+one declared numerical path. Capabilities describe implemented signals only:
+`scientifically_qualified` remains false. Real task-checkpoint, batching,
+alignment, pooling and signed/permutation G1 checks are still required on one
+immutable runtime before primary extraction.
+
+The schema-1 pilots below predate this implementation. Their finite-value,
+alignment and candidate-logit completeness evidence does not qualify schema-2
+margin or embedding signals, and no new image publication/deployment is implied.
 
 ### Remote pilot check on October 10 2026
 

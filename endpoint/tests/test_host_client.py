@@ -1,166 +1,112 @@
-"""Validate remote Laya responses before the experiment consumes them."""
+"""Reject incompatible numerical signals and exact execution/cache identities."""
 
 import copy
 import math
-import sys
-from importlib import import_module
-from pathlib import Path
 
 import pytest
+from experiments.laya_endpoint import client
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-client = import_module("experiments.laya_endpoint.client")
-validate_response = client.validate_response
-
-
-@pytest.fixture
-def request_payload():
-    revision = {"repository": "convaiinnovations/laya", "revision": "a" * 40}
-    return {
-        "schema_version": "1",
-        "request_id": "request-1",
-        "run_id": "run-1",
-        "window_index": 0,
-        "model": revision,
-        "tokenizer": revision,
-        "candidates": [
-            {"candidate_id": "ham", "description": "A genuine comment."},
-            {"candidate_id": "spam", "description": "An unsolicited promotional comment."},
-        ],
-        "samples": [{"sample_id": "youtube-1", "text": "A short comment."}],
-        "attribution": {
-            "method": "integrated_gradients",
-            "target_candidate_id": "spam",
-            "n_steps": 64,
-        },
-    }
-
-
-@pytest.fixture
-def response_payload(request_payload):
-    revision = request_payload["model"]
-    return {
-        "schema_version": "1",
-        "request_id": request_payload["request_id"],
-        "run_id": request_payload["run_id"],
-        "window_index": request_payload["window_index"],
-        "model": revision,
-        "tokenizer": revision,
-        "score_semantics": "choice_probability",
-        "samples": [
-            {
-                "sample_id": "youtube-1",
-                "predicted_candidate_id": "spam",
-                "scores": [
-                    {"candidate_id": "ham", "probability": 0.3},
-                    {"candidate_id": "spam", "probability": 0.7},
-                ],
-                "attribution": {
-                    "method": "integrated_gradients",
-                    "target_candidate_id": "spam",
-                    "target_semantics": "candidate_logit",
-                    "baseline": "pad_document_tokens",
-                    "n_steps": 64,
-                    "token_width": 3,
-                    "token_ids": [101, 202, 102],
-                    "tokens": ["[CLS]", "comment", "[SEP]"],
-                    "segments": ["special", "document", "special"],
-                    "values": [0.0, 0.5, 0.0],
-                    "state_token_start": 1,
-                    "state_token_count": 1,
-                    "state_tokens_total": 1,
-                    "state_tokens_dropped": 0,
-                    "completeness_delta": 0.001,
-                },
-            }
-        ],
-    }
-
-
-def test_accepts_maximum_adaptive_ig_evaluation_count(request_payload, response_payload):
-    response = copy.deepcopy(response_payload)
-    response["samples"][0]["attribution"]["n_steps"] = 16384
-
-    validate_response(request_payload, response)
+from expl_drift_endpoint.contract import ExtractionRequest
+from expl_drift_endpoint.laya_adapter import LayaAdapter
 
 
 @pytest.mark.parametrize(
-    ("mutate", "message"),
+    "mutate",
     [
-        (lambda response: response["samples"][0]["scores"].reverse(), "score order"),
-        (
-            lambda response: response["samples"][0]["scores"][1].update(probability=0.2),
-            "do not sum to one",
-        ),
-        (
-            lambda response: response["samples"][0]["attribution"]["values"].append(math.nan),
-            "misaligned",
-        ),
-        (
-            lambda response: response["samples"][0]["attribution"].update(state_tokens_dropped=1),
-            "truncation count",
-        ),
-        (
-            lambda response: response["samples"][0]["attribution"].update(completeness_delta=0.1),
-            "completeness residual",
-        ),
-        (
-            lambda response: response["samples"][0]["attribution"].update(n_steps=16385),
-            "evaluation count",
-        ),
+        lambda r: r["samples"][0]["scores"].reverse(),
+        lambda r: r["samples"][0]["scores"][0].update(logit=999.0),
+        lambda r: r["samples"][0]["attribution"].update(baseline_target_value=999.0),
+        lambda r: r["samples"][0]["attribution"].update(completeness_delta=0.5),
+        lambda r: r["samples"][0]["attribution"].update(gradient_evaluations=16385),
+        lambda r: r["samples"][0]["attribution"]["values"].append(math.nan),
+        lambda r: r["samples"][0]["tokens"].update(state_tokens_dropped=0),
+        lambda r: r["samples"][0]["representation"].update(values=[math.nan]),
     ],
 )
-def test_rejects_invalid_scores_or_ig_alignment(request_payload, response_payload, mutate, message):
+def test_changed_scores_or_incomplete_quantities_are_rejected(
+    request_payload, response_payload, mutate
+):
     response = copy.deepcopy(response_payload)
     mutate(response)
+    with pytest.raises(ValueError):
+        client.validate_response(request_payload, response)
 
-    with pytest.raises(ValueError, match=message):
-        validate_response(request_payload, response)
+
+@pytest.mark.parametrize("change", ["text", "target", "precision", "runtime", "batch_order"])
+def test_cache_is_bound_to_complete_fingerprint(
+    tmp_path, request_payload, response_payload, change
+):
+    path = tmp_path / "cache.json"
+    client.atomic_write_json(
+        path, {"request_sha256": client.sha256_json(request_payload), "response": response_payload}
+    )
+    changed = copy.deepcopy(request_payload)
+    if change == "text":
+        changed["samples"][0]["text"] += "!"
+    elif change == "target":
+        (
+            changed["decision_target"]["target_candidate_id"],
+            changed["decision_target"]["reference_candidate_id"],
+        ) = "alpha", "beta"
+    elif change == "precision":
+        changed["precision"] = "other_path"
+    elif change == "runtime":
+        changed["runtime"]["configured_image_digest"] = "sha256:" + "c" * 64
+    else:
+        changed["samples"].reverse()
+    with pytest.raises(ValueError):
+        client.load_cached_response(path, changed)
 
 
-def test_split_batch_cache_resumes_and_merges_validated_subresponses(
-    tmp_path, request_payload, response_payload
+def test_partial_cache_replays_exact_children_and_keeps_actual_batch_context(
+    tmp_path,
+    request_payload,
+    runtime_identity,
+    fake_agent,
 ):
     request = copy.deepcopy(request_payload)
     request["samples"] = [
-        {"sample_id": f"youtube-{index}", "text": f"Comment {index}."} for index in range(9)
+        {"sample_id": f"sample-{i}", "text": "positive" if i % 2 else "negative"} for i in range(9)
     ]
     request["corpus_sha256"] = client.sha256_json(request["samples"])
-    subrequests = client.split_request(request)
-
-    assert [len(part["samples"]) for part in subrequests] == [8, 1]
-    assert [sample for part in subrequests for sample in part["samples"]] == request["samples"]
-
-    def part_record(part):
-        response = copy.deepcopy(response_payload)
-        response["request_id"] = part["request_id"]
-        response["run_id"] = part["run_id"]
-        response["window_index"] = part["window_index"]
-        response["samples"] = []
-        for sample in part["samples"]:
-            output = copy.deepcopy(response_payload["samples"][0])
-            output["sample_id"] = sample["sample_id"]
-            response["samples"].append(output)
-        return {
-            "request_sha256": client.sha256_json(part),
-            "request": part,
-            "endpoint_image_digest": "sha256:" + "a" * 64,
-            "response": response,
+    children = client.split_request(request)
+    adapter = LayaAdapter(fake_agent, "/fixture", runtime=runtime_identity)
+    records = [
+        {
+            "request": child,
+            "request_sha256": client.sha256_json(child),
+            "endpoint_image_digest": runtime_identity.configured_image_digest,
+            "response": adapter.extract(ExtractionRequest.model_validate(child)).model_dump(
+                mode="json"
+            ),
         }
-
-    cache_path = tmp_path / "window.json"
-    cache_entry = {
-        "request_sha256": client.sha256_json(request),
-        "subresponses": [part_record(subrequests[0])],
-    }
-    client.atomic_write_json(cache_path, cache_entry)
-    assert client.load_cached_response(cache_path, request) is None
-
-    cache_entry["subresponses"].append(part_record(subrequests[1]))
-    client.atomic_write_json(cache_path, cache_entry)
-    merged = client.load_cached_response(cache_path, request)
-
-    assert [sample["sample_id"] for sample in merged["samples"]] == [
-        sample["sample_id"] for sample in request["samples"]
+        for child in children
     ]
-    assert merged["request_id"] == request["request_id"]
+    cache = tmp_path / "window.json"
+    client.atomic_write_json(
+        cache, {"request_sha256": client.sha256_json(request), "subresponses": records[:1]}
+    )
+    assert client.load_cached_response(cache, request) is None
+    client.atomic_write_json(
+        cache, {"request_sha256": client.sha256_json(request), "subresponses": records}
+    )
+    merged = client.load_cached_response(cache, request)
+    assert [sample["target_value"] for sample in merged["samples"]] == [
+        -16.0,
+        8.0,
+        -16.0,
+        8.0,
+        -16.0,
+        8.0,
+        -16.0,
+        8.0,
+        -16.0,
+    ]
+    assert [part["response"]["batch_context_sha256"] for part in merged["execution_batches"]] == [
+        client.sha256_json(child["samples"]) for child in children
+    ]
+    assert "batch_context_sha256" not in merged
+    corrupted = copy.deepcopy(merged)
+    corrupted["samples"][0]["target_value"] = 1.0
+    with pytest.raises(ValueError):
+        client.validate_response(request, corrupted)

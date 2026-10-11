@@ -40,7 +40,7 @@ def main() -> None:
     # Synthetic revisions exercise the contract without loading a model.
     revision = {"repository": "fixture/model", "revision": "a" * 40}
     payload = {
-        "schema_version": "1",
+        "schema_version": "2",
         "request_id": "container-smoke",
         "run_id": "ci-smoke",
         "window_index": 0,
@@ -54,6 +54,23 @@ def main() -> None:
         ],
         "samples": [{"sample_id": "ticket-1", "text": "I was charged twice."}],
         "max_tokens": 512,
+        "decision_target": {
+            "target_semantics": "fixed_candidate_margin",
+            "target_candidate_id": "technical",
+            "reference_candidate_id": "billing",
+        },
+        "precision": "float32_no_autocast",
+        "tokenization": "laya_sdk_0.3.29_encode_state",
+        "pooling": "document_mean_last_hidden_state",
+        "runtime": {
+            "implementation_sha256": "c" * 64,
+            "checkpoint_artifact_sha256": "d" * 64,
+            "sdk_version": "fixture", "torch_version": "fixture",
+            "transformers_version": "fixture", "python_version": "fixture",
+            "device": "cpu", "cuda_version": None, "gpu_name": None,
+            "settings_sha256": "e" * 64,
+            "configured_image_digest": "sha256:" + "f" * 64,
+        },
     }
     status, body = request("/extract", payload)
     if status != 503 or body.get("detail", {}).get("request_id") != "container-smoke":

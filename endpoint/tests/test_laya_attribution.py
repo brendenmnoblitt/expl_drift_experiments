@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from expl_drift_endpoint.contract import AttributionPlan, AttributionSignal
+from expl_drift_endpoint.contract import SampleScores
 from expl_drift_endpoint.laya_attribution import (
     MAX_IG_COMPUTE_STEPS,
     _validate_completeness,
@@ -119,13 +119,6 @@ def test_completeness_tolerance_checks_absolute_and_relative_error():
         _validate_completeness(completeness_delta=0.0101, logit_delta=0.0)
 
 
-def test_integrated_gradients_default_uses_64_steps_and_caps_requested_steps():
-    plan = AttributionPlan(method="integrated_gradients", target_candidate_id="alpha")
-    assert plan.n_steps == 64
-    with pytest.raises(ValidationError, match="less than or equal to 64"):
-        AttributionPlan(method="integrated_gradients", target_candidate_id="alpha", n_steps=65)
-
-
 def test_integrated_gradients_rejects_invalid_steps_and_shapes():
     values = np.ones((1, 2))
     with pytest.raises(ValueError, match="n_steps"):
@@ -141,31 +134,17 @@ def test_state_token_span_excludes_layas_closing_separator():
         state_token_span(4, {"state_tokens_used": 4})
 
 
-def test_attribution_contract_requires_aligned_fixed_width_arrays():
-    payload = {
-        "method": "integrated_gradients",
-        "target_candidate_id": "alpha",
-        "target_semantics": "candidate_logit",
-        "baseline": "pad_document_tokens",
-        "n_steps": MAX_IG_COMPUTE_STEPS,
-        "token_width": 3,
-        "token_ids": [1, 2, 3],
-        "tokens": ["[CLS]", "word", "[SEP]"],
-        "segments": ["special", "document", "special"],
-        "values": [0.0, 0.5, 0.0],
-        "state_token_start": 1,
-        "state_token_count": 1,
-        "state_tokens_total": 2,
-        "state_tokens_dropped": 1,
-        "completeness_delta": 0.01,
-    }
-    assert AttributionSignal.model_validate(payload).token_width == 3
-    payload["n_steps"] = MAX_IG_COMPUTE_STEPS + 1
-    with pytest.raises(ValidationError, match=f"less than or equal to {MAX_IG_COMPUTE_STEPS}"):
-        AttributionSignal.model_validate(payload)
-
-    payload["n_steps"] = MAX_IG_COMPUTE_STEPS
-
-    payload["values"] = [0.0, 0.5]
-    with pytest.raises(ValidationError, match="must match token_width"):
-        AttributionSignal.model_validate(payload)
+@pytest.mark.parametrize("change", ["token_width", "document_span", "baseline_quantity"])
+def test_saved_attribution_contract_rejects_misalignment_and_unrecalculable_residual(
+    response_payload,
+    change,
+):
+    payload = response_payload["samples"][0]
+    if change == "token_width":
+        payload["attribution"]["values"].pop()
+    elif change == "document_span":
+        payload["tokens"]["state_token_start"] += 1
+    else:
+        payload["attribution"]["baseline_target_value"] += 1.0
+    with pytest.raises(ValidationError):
+        SampleScores.model_validate(payload)

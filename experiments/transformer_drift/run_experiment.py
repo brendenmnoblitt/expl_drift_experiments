@@ -276,7 +276,19 @@ def run_single_experiment(
 
         attrs = extract_attributions(model, tokenizer, texts, attribution_method, device)
         attrs = _mask_attention_sink(attrs, model_type)
-        drift_input = summarize_attributions(attrs) if is_decoder else attrs
+        if is_decoder:
+            encoded = tokenizer(
+                list(texts), padding="max_length", truncation=True,
+                max_length=MAX_SEQ_LENGTH, return_special_tokens_mask=True,
+                return_tensors="np",
+            )
+            document_mask = (
+                encoded["attention_mask"].astype(bool)
+                & ~encoded["special_tokens_mask"].astype(bool)
+            )
+            drift_input = summarize_attributions(attrs, document_mask=document_mask)
+        else:
+            drift_input = attrs
         drift_inputs.append(drift_input)
 
         acc = compute_accuracy(model, tokenizer, texts, labels, device)
