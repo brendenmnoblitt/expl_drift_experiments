@@ -5,7 +5,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-MAX_IG_COMPUTE_STEPS = 8192
+MAX_IG_COMPUTE_STEPS = 16384
 
 Identifier = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")]
 Commit = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]

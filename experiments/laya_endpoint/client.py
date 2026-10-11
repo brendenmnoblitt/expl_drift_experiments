@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 
 COMPLETENESS_ATOL = 0.01
 COMPLETENESS_RTOL = 0.01
-MAX_IG_COMPUTE_STEPS = 8192
+MAX_IG_COMPUTE_STEPS = 16384
 
 
 def canonical_json(value: Any) -> bytes:

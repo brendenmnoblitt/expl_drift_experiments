@@ -93,8 +93,10 @@ ordered choice probabilities with `choice_probability` semantics. Requests may
 include candidate-targeted Integrated Gradients with `candidate_logit`
 semantics. IG requests default to 64. Adaptive composite Gauss-Legendre
 integration estimates local error with 8- and 16-point rules, then bisects the
-highest-error interval until the hard completeness gate passes or 8192 evaluations.
-The response's `n_steps` field records total gradient evaluations and allows the full 8192-evaluation integration cap.
+highest-error interval until the hard completeness gate passes or 16384 evaluations.
+The response's `n_steps` field records total gradient evaluations and allows the full
+16384-evaluation integration cap. This cap was raised after one sample failed
+completeness at 8192 evaluations; the tolerance remains unchanged.
 IG is rejected unless completeness residual is at most
 `0.01 + 0.01 * abs(logit_delta)`. Token alignment, finite values, and truncation
 counts are validated in the response. Health capability advertisement indicates
@@ -109,7 +111,7 @@ on HF. The score path calls SDK `predict_batch`; IG uses the pinned SDK's privat
 sequence builder/collator and substitutes input embeddings while retaining the
 decision head. It disables autocast so logits and gradients use the same
 precision path. Adaptive composite Gauss-Legendre integration bisects the
-highest-error interval until completeness passes or the 8192-evaluation cap is hit.
+highest-error interval until completeness passes or the 16384-evaluation cap is hit.
 The remote pilot's 24 examples passed finite-value, token-alignment, truncation,
 and hard completeness validation. Independent decision-score parity against a
 native-SDK reference remains open; do not interpret explanation drift until that

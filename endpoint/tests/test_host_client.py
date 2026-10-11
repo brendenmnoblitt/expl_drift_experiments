@@ -78,7 +78,7 @@ def response_payload(request_payload):
 
 def test_accepts_maximum_adaptive_ig_evaluation_count(request_payload, response_payload):
     response = copy.deepcopy(response_payload)
-    response["samples"][0]["attribution"]["n_steps"] = 8192
+    response["samples"][0]["attribution"]["n_steps"] = 16384
 
     validate_response(request_payload, response)
 
@@ -104,7 +104,7 @@ def test_accepts_maximum_adaptive_ig_evaluation_count(request_payload, response_
             "completeness residual",
         ),
         (
-            lambda response: response["samples"][0]["attribution"].update(n_steps=8193),
+            lambda response: response["samples"][0]["attribution"].update(n_steps=16385),
             "evaluation count",
         ),
     ],
