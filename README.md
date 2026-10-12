@@ -252,32 +252,45 @@ recalculable completeness. The data path now uses the corrected inventory and
 one representative per duplicate/template group. Its legacy window-count
 profiles remain development-only, not the seven-role primary study.
 The development qualifier is endpoint-only; it does not load a local model.
-It requires the designated eight-example YouTube development allocation and
-the fixed ham/spam task. It checks `/health` against schema 2, the pinned model,
+It requires exactly eight designated development examples for the selected
+corpus and preserves its frozen candidate order/reference. YouTube runs the
+spam-minus-ham margin; AG News runs each of the three non-reference class
+margins against world. It checks `/health` against schema 2, the pinned model,
 required capabilities, and the requested immutable image digest before
-extraction. Run only after an explicit endpoint resource decision:
+extraction. Run only after explicit approval for the corresponding request and
+gradient-evaluation ceiling:
 
 ```bash
 export LAYA_ENDPOINT_URL="https://<endpoint-url>"
 export LAYA_ENDPOINT_IMAGE_DIGEST="sha256:<published-image-digest>"
 export HF_TOKEN="<read token for the private endpoint>"
 python -m experiments.research_extension.laya_qualification \
+  --task youtube \
   --development-json results/research-extension-data/youtube-v2/bounded-development-qualification.json \
   --output results/research-extension-data/remote-laya-qualification-v1/youtube \
   --allow-remote-execution
 ```
 
-The fixed qualification makes at most 22 extraction requests for 8 designated
-development examples, repeats batch sizes 1, 4 and 8 twice, sets a 15-minute
-per-request timeout and a 2-hour total wall-time ceiling, and never retries.
-Requested IG uses 64 steps. The service caps adaptive work at 16,384 gradient
-evaluations per example, bounding this plan at 786,432 total evaluations.
-Each successful response and outcome is fsynced before
-the next request. A failed run is not resumed; start a separately identified
-fresh run only after inspecting its saved records. This is not G1 completion.
-The live endpoint was not contacted when this orchestration was implemented;
-the checked-in contract is schema 2, but the presently deployed runtime was not
-verified.
+AG News uses a separate run:
+
+```bash
+python -m experiments.research_extension.laya_qualification \
+  --task ag_news \
+  --development-json results/research-extension-data/ag-news/bounded-development-qualification.json \
+  --output results/research-extension-data/remote-laya-qualification-v1/ag-news \
+  --allow-remote-execution
+```
+
+Each task repeats batch sizes 1, 4 and 8 twice, sets a 15-minute per-request
+timeout and a 2-hour total wall-time ceiling, and never retries. The YouTube
+binary task makes at most 22 extraction requests (8 examples × 6 passes), with
+a 786,432-gradient-evaluation ceiling. The four-candidate AG News task makes
+at most 66 requests, with a 2,359,296-evaluation ceiling. Requested IG uses
+64 steps; the service caps adaptive work at 16,384 evaluations per target and
+example. Each successful response and outcome is fsynced before the next
+request. A failed run is not resumed; start a separately identified fresh run
+only after inspecting its saved records. These development comparisons do not
+pass G1.
 
 The interrupted local native-SDK artifacts under
 `results/research-extension-data/native-laya-qualification-v2/` are preserved

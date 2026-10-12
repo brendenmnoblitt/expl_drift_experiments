@@ -1,30 +1,38 @@
 import json
+import math
 
 import pytest
 
 from experiments.research_extension.laya_qualification import (
-    MAX_REQUESTS,
-    MAX_TOTAL_GRADIENT_EVALUATIONS,
+    MAX_GRADIENT_EVALUATIONS_PER_TARGET,
+    MAX_REQUESTS_PER_TARGET,
     MODEL,
+    TASKS,
     qualify_laya,
 )
 
 IMAGE = "sha256:" + "a" * 64
-CANDIDATES = [
-    {"candidate_id": "ham", "description": "A genuine comment."},
-    {"candidate_id": "spam", "description": "A spam comment."},
-]
-DEVELOPMENT = {
-    "role": "development",
-    "task": {"candidate_ids": ["ham", "spam"], "reference_candidate_id": "ham"},
-    "samples": [{"sample_id": f"dev-{i}", "text": f"comment {i}"} for i in range(8)],
-}
-TASK = {"instructions": "Classify this comment.", "candidates": CANDIDATES}
+
+
+def development(task_id):
+    candidate_ids = [candidate["candidate_id"] for candidate in TASKS[task_id]["candidates"]]
+    return {
+        "role": "development",
+        "task": {
+            "candidate_ids": candidate_ids,
+            "reference_candidate_id": candidate_ids[0],
+        },
+        "samples": [{"sample_id": f"{task_id}-{i}", "text": f"sample {i}"} for i in range(8)],
+    }
 
 
 class FakeClient:
+    fail_at: int | None
+
     def __init__(self, base_url, token, *, timeout):
         self.base_url = base_url
+        self.token = token
+        self.timeout = timeout
         self.calls = []
         self.fail_at = None
 
@@ -42,14 +50,21 @@ class FakeClient:
 
     def extract(self, request):
         self.calls.append(request)
-        if len(self.calls) == getattr(self, "fail_at", None):
+        if len(self.calls) == self.fail_at:
             raise TimeoutError("simulated bounded request timeout")
+        candidate_ids = [candidate["candidate_id"] for candidate in request["candidates"]]
+        logits = [1.0 - index * 0.25 for index in range(len(candidate_ids))]
+        exponentials = [math.exp(value - max(logits)) for value in logits]
+        probabilities = [value / sum(exponentials) for value in exponentials]
+        target = request["decision_target"]["target_candidate_id"]
+        reference = request["decision_target"]["reference_candidate_id"]
+        margin = logits[candidate_ids.index(target)] - logits[candidate_ids.index(reference)]
         rows = []
         for item in request["samples"]:
             tokens = {
                 "token_width": 1,
                 "token_ids": [11],
-                "tokens": ["comment"],
+                "tokens": ["sample"],
                 "segments": ["document"],
                 "state_token_start": 0,
                 "state_token_count": 1,
@@ -59,30 +74,37 @@ class FakeClient:
             rows.append(
                 {
                     "sample_id": item["sample_id"],
-                    "predicted_candidate_id": "ham",
+                    "predicted_candidate_id": candidate_ids[0],
                     "scores": [
-                        {"candidate_id": "ham", "logit": 1.0, "probability": 0.7310586},
-                        {"candidate_id": "spam", "logit": 0.0, "probability": 0.2689414},
+                        {"candidate_id": candidate, "logit": logit, "probability": probability}
+                        for candidate, logit, probability in zip(
+                            candidate_ids, logits, probabilities, strict=True
+                        )
                     ],
                     "tokens": tokens,
                     "representation": {"values": [0.25, -0.5]},
                     "attribution": {
-                        "values": [-1.0],
-                        "input_target_value": -1.0,
+                        "values": [margin],
+                        "input_target_value": margin,
                         "baseline_target_value": 0.0,
                         "completeness_delta": 0.0,
                         "gradient_evaluations": 64,
                     },
                 }
             )
-        return {"samples": rows, "latency_seconds": 0.01}
+        return {
+            "decision_target": request["decision_target"],
+            "samples": rows,
+            "latency_seconds": 0.01,
+        }
 
 
-def run(tmp_path, client, **overrides):
+def run(tmp_path, task_id, client, **overrides):
     return qualify_laya(
-        DEVELOPMENT,
-        TASK,
-        tmp_path / "remote",
+        development(task_id),
+        TASKS[task_id],
+        task_id,
+        tmp_path / task_id,
         endpoint_url="https://example.invalid",
         token="not-a-real-token",
         image_digest=IMAGE,
@@ -93,41 +115,53 @@ def run(tmp_path, client, **overrides):
 
 
 def test_remote_execution_requires_explicit_approval_before_creating_output(tmp_path):
-    output = tmp_path / "remote"
     with pytest.raises(ValueError, match="explicit approval"):
         qualify_laya(
-            DEVELOPMENT,
-            TASK,
-            output,
+            development("youtube"),
+            TASKS["youtube"],
+            "youtube",
+            tmp_path / "remote",
             endpoint_url="https://example.invalid",
             token="token",
             image_digest=IMAGE,
         )
-    assert not output.exists()
+    assert not (tmp_path / "remote").exists()
 
 
-def test_success_is_bounded_and_persists_each_remote_result(tmp_path):
+@pytest.mark.parametrize(
+    ("task_id", "expected_targets", "expected_requests", "gradient_budget"),
+    [
+        ("youtube", 1, 22, 786432),
+        ("ag_news", 3, 66, 2359296),
+    ],
+)
+def test_tasks_qualify_all_fixed_margins_with_bounded_persisted_requests(
+    task_id, expected_targets, expected_requests, gradient_budget, tmp_path
+):
     client = FakeClient("url", "token", timeout=1)
-    report = run(tmp_path, client)
+    report = run(tmp_path, task_id, client)
 
-    assert len(client.calls) == MAX_REQUESTS == 22
-    assert [len(request["samples"]) for request in client.calls].count(1) == 16
-    assert [len(request["samples"]) for request in client.calls].count(4) == 4
-    assert [len(request["samples"]) for request in client.calls].count(8) == 2
-    assert all(
-        request["decision_target"]["target_candidate_id"] == "spam" for request in client.calls
+    assert len(client.calls) == expected_requests
+    assert expected_requests == MAX_REQUESTS_PER_TARGET * expected_targets
+    assert (
+        len({request["decision_target"]["target_candidate_id"] for request in client.calls})
+        == expected_targets
     )
-    output = tmp_path / "remote"
-    assert len(list((output / "responses").glob("response-*.json"))) == MAX_REQUESTS
+    assert [len(request["samples"]) for request in client.calls].count(1) == 16 * expected_targets
+    assert [len(request["samples"]) for request in client.calls].count(4) == 4 * expected_targets
+    assert [len(request["samples"]) for request in client.calls].count(8) == 2 * expected_targets
+    output = tmp_path / task_id
+    assert len(list((output / "responses").glob("response-*.json"))) == expected_requests
     events = [json.loads(line) for line in (output / "events.jsonl").read_text().splitlines()]
-    assert len(events) == MAX_REQUESTS
+    assert len(events) == expected_requests
     assert all(event["status"] == "completed" for event in events)
     assert report["comparison"]["numerical_comparison_passed"]
+    assert report["measured_cost"]["requests_completed"] == expected_requests
     plan = json.loads((output / "comparison-plan.json").read_text())
-    assert plan["max_total_gradient_evaluations"] == MAX_TOTAL_GRADIENT_EVALUATIONS == 786432
+    assert plan["max_total_gradient_evaluations"] == gradient_budget
+    assert plan["max_gradient_evaluations_per_target"] == MAX_GRADIENT_EVALUATIONS_PER_TARGET
     assert plan["max_request_timeout_seconds"] == 900
     assert plan["max_total_wall_seconds"] == 7200
-    assert report["measured_cost"]["requests_completed"] == MAX_REQUESTS
     assert report["G1"].startswith("not_established:")
 
 
@@ -135,9 +169,9 @@ def test_failed_request_is_logged_without_retry_and_prior_responses_remain(tmp_p
     client = FakeClient("url", "token", timeout=1)
     client.fail_at = 3
     with pytest.raises(TimeoutError, match="simulated"):
-        run(tmp_path, client)
+        run(tmp_path, "youtube", client)
 
-    output = tmp_path / "remote"
+    output = tmp_path / "youtube"
     assert len(client.calls) == 3
     assert len(list((output / "responses").glob("response-*.json"))) == 2
     events = [json.loads(line) for line in (output / "events.jsonl").read_text().splitlines()]
@@ -149,11 +183,12 @@ def test_failed_request_is_logged_without_retry_and_prior_responses_remain(tmp_p
     "role", ["training", "reference", "held_out_stable", "held_out_evaluation"]
 )
 def test_non_development_roles_are_refused_without_output(role, tmp_path):
-    development = {**DEVELOPMENT, "role": role}
+    data = {**development("youtube"), "role": role}
     with pytest.raises(ValueError, match="designated development"):
         qualify_laya(
-            development,
-            TASK,
+            data,
+            TASKS["youtube"],
+            "youtube",
             tmp_path / "remote",
             endpoint_url="url",
             token="token",
