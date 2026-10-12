@@ -135,3 +135,21 @@ def test_gpt2_margin_target_does_not_follow_changed_prediction():
         np.testing.assert_allclose(
             reversed_target["values"], -np.array(original_target["values"]), atol=1e-6
         )
+
+
+@pytest.mark.parametrize("model_type", ["bert", "gpt2"])
+def test_large_signed_values_have_exact_persisted_completeness(model_type):
+    import math
+
+    adapter = tiny_reference(model_type)
+    head = adapter.model.classifier if model_type == "bert" else adapter.model.score
+    with torch.no_grad():
+        head.weight.mul_(16384)
+    sample = adapter.extract(["hello world ! hello"], ["large-margin"])["samples"][0]
+    for target in sample["attributions"]:
+        residual = (
+            target["input_target_value"]
+            - target["baseline_target_value"]
+            - math.fsum(target["values"])
+        )
+        assert target["completeness_delta"] == pytest.approx(residual, abs=1e-12, rel=0)

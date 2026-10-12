@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +75,7 @@ def compare_banks(banks: list[dict[str, Any]], *, atol: float, rtol: float) -> d
                         raise ValueError("qualification changed fixed decision target")
                 for signal in (a, b):
                     delta = signal["input_target_value"] - signal["baseline_target_value"]
-                    residual = delta - float(np.sum(signal["values"]))
+                    residual = delta - math.fsum(signal["values"])
                     if not np.isclose(residual, signal["completeness_delta"], atol=1e-6, rtol=1e-6):
                         raise ValueError("saved reference completeness cannot be recalculated")
                     tolerance = bank["runtime"]["completeness_atol"] + bank["runtime"][

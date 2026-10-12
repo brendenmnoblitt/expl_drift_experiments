@@ -289,15 +289,18 @@ class ReferenceAdapter:
                         completeness_tolerance=tolerance,
                     )
                     values = attrs.sum(dim=-1)[0]
-                    residual = delta - float(values.sum().item())
-                    if not torch.isfinite(values).all() or abs(residual) > tolerance:
+                    if not torch.isfinite(values).all():
+                        raise RuntimeError("reference IG produced non-finite values")
+                    saved_values = values.cpu().tolist()
+                    residual = delta - math.fsum(saved_values)
+                    if abs(residual) > tolerance:
                         raise RuntimeError("reference IG failed completeness")
                     targets.append(
                         {
                             "target_candidate_id": candidate_id,
                             "reference_candidate_id": self.candidate_ids[self.reference_index],
                             "target_semantics": "fixed_candidate_margin",
-                            "values": values.cpu().tolist(),
+                            "values": saved_values,
                             "input_target_value": input_value,
                             "baseline_target_value": baseline_value,
                             "completeness_delta": residual,
