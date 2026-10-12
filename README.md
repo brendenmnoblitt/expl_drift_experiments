@@ -292,6 +292,16 @@ request. A failed run is not resumed; start a separately identified fresh run
 only after inspecting its saved records. These development comparisons do not
 pass G1.
 
+Preflight of the supplied HF endpoint on 2026-10-12 found it paused. After
+explicit restart approval, `/health` returned schema 1 for the pinned Laya
+revision, with only `decision_scores` and `integrated_gradients`; it supplied
+no image digest and does not implement the schema-2 fixed-margin and document
+representation contract. The endpoint was paused again without extraction.
+The redacted record is
+`results/research-extension-data/remote-laya-qualification-v1/youtube-preflight-2026-10-12.json`.
+Do not run the schema-2 qualifier against this endpoint state. Deploying or
+reconfiguring an endpoint requires a separate resource decision.
+
 The interrupted local native-SDK artifacts under
 `results/research-extension-data/native-laya-qualification-v2/` are preserved
 as historical diagnostics. They are not resumed, merged with endpoint output,
