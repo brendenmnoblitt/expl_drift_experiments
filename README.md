@@ -251,6 +251,38 @@ representations, exact runtime/batch fingerprints, and independently
 recalculable completeness. The data path now uses the corrected inventory and
 one representative per duplicate/template group. Its legacy window-count
 profiles remain development-only, not the seven-role primary study.
+The development qualifier is endpoint-only; it does not load a local model.
+It requires the designated eight-example YouTube development allocation and
+the fixed ham/spam task. It checks `/health` against schema 2, the pinned model,
+required capabilities, and the requested immutable image digest before
+extraction. Run only after an explicit endpoint resource decision:
+
+```bash
+export LAYA_ENDPOINT_URL="https://<endpoint-url>"
+export LAYA_ENDPOINT_IMAGE_DIGEST="sha256:<published-image-digest>"
+export HF_TOKEN="<read token for the private endpoint>"
+python -m experiments.research_extension.laya_qualification \
+  --development-json results/research-extension-data/youtube-v2/bounded-development-qualification.json \
+  --output results/research-extension-data/remote-laya-qualification-v1/youtube \
+  --allow-remote-execution
+```
+
+The fixed qualification makes at most 22 extraction requests for 8 designated
+development examples, repeats batch sizes 1, 4 and 8 twice, sets a 15-minute
+per-request timeout and a 2-hour total wall-time ceiling, and never retries.
+Requested IG uses 64 steps. The service caps adaptive work at 16,384 gradient
+evaluations per example, bounding this plan at 786,432 total evaluations.
+Each successful response and outcome is fsynced before
+the next request. A failed run is not resumed; start a separately identified
+fresh run only after inspecting its saved records. This is not G1 completion.
+The live endpoint was not contacted when this orchestration was implemented;
+the checked-in contract is schema 2, but the presently deployed runtime was not
+verified.
+
+The interrupted local native-SDK artifacts under
+`results/research-extension-data/native-laya-qualification-v2/` are preserved
+as historical diagnostics. They are not resumed, merged with endpoint output,
+or accepted as endpoint qualification.
 
 Configure a separately approved immutable schema-2 model-runtime image:
 
