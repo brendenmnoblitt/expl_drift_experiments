@@ -65,6 +65,7 @@ class SourceRecord:
     source_label: str
     group_id: str
     exclusions: tuple[str, ...]
+    source_split: str = "collection"
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,28 @@ class Inventory:
             "records": [asdict(row) for row in self.records],
             "groups": list(self.groups),
         }
+
+    @classmethod
+    def from_artifact(cls, artifact: dict[str, Any]) -> Inventory:
+        """Restore an exact current-schema inventory; reject tampered or obsolete data."""
+        manifest = artifact["manifest"]
+        if manifest.get("schema_version") != 2:
+            raise ValueError("inventory schema 2 is required; regenerate from pinned source")
+        payload = {
+            "manifest": {k: v for k, v in manifest.items() if k != "inventory_sha256"},
+            "records": artifact["records"],
+            "groups": artifact["groups"],
+        }
+        if manifest.get("inventory_sha256") != sha256_json(payload):
+            raise ValueError("inventory content/hash mismatch")
+        records = tuple(
+            SourceRecord(**{**row, "exclusions": tuple(row["exclusions"])})
+            for row in artifact["records"]
+        )
+        result = cls(records, tuple(artifact["groups"]), manifest)
+        if sha256_json(result.artifact()) != sha256_json(artifact):
+            raise ValueError("inventory serialization is not canonical")
+        return result
 
 
 class _Components:
@@ -236,7 +259,7 @@ def load_youtube_archive(path: str | Path, *, expected_sha256: str = DATASET_SHA
     groups.sort(key=lambda group: group["group_id"])
     eligible = [row for row in records if not row.exclusions]
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "dataset": "UCI YouTube Spam Collection",
         "archive_sha256": digest,
         "url": DATASET_URL if digest == DATASET_SHA256 else None,
