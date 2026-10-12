@@ -83,7 +83,7 @@ are established by the development checks.
 
 ```bash
 python -m experiments.research_extension.data --download \
-  --output results/research-extension-data
+  --output results/research-extension-data/youtube-v2
 ```
 
 The CPU-only command verifies the archive pin, strictly decodes UTF-8, preserves
@@ -91,7 +91,7 @@ exact source CONTENT, and writes inventories, source-ID/exact-text/template
 links, exclusions, label/video counts, hashes, and provisional feasibility.
 Source video is a retained grouping variable, not a video-disjoint holdout.
 Role allocation requires all seven roles, including development, with explicit
-counts and optional binary class counts. `schedule.allocate_roles` and
+counts and optional task-schema class counts. `schedule.allocate_roles` and
 `schedule.build_schedule` allocate whole groups exactly or report infeasibility;
 they never silently downsize, split incompatible roles, or repeat a group across
 windows. Paired controls explicitly declare shared membership and transformations.
@@ -100,7 +100,7 @@ For saved role/window request JSON:
 
 ```bash
 python -m experiments.research_extension.data --download \
-  --output results/research-extension-data \
+  --output results/research-extension-data/youtube-v2 \
   --requests results/research-extension-data/role-requests.json \
   --windows results/research-extension-data/window-requests.json \
   --schedule-id youtube-candidate-design-seed42 --seed 42
@@ -110,6 +110,89 @@ Existing files are accepted only when identical; incompatible replacement fails.
 The saved candidate design is not G2 freeze or null-budget qualification. Raw
 inventories/schedules live under the ignored artifact directory, not in Git.
 
+### Pinned AG News preparation
+
+```bash
+python -m experiments.research_extension.ag_news --download \
+  --output results/research-extension-data/ag-news
+```
+
+The command verifies both Parquet files from `fancyzhx/ag_news` revision
+`eb185aade064a813bc0b7f42de02595523103ca4` before decoding. PyArrow is an
+explicit experiment dependency. Exact input text is retained; grouping uses
+the same conservative case/whitespace/URL-template policy as YouTube.
+Conflicting-label groups are excluded. Test records in any group containing
+a training record are excluded, including template matches.
+
+Pass `--requests /path/to/role-requests.json` to allocate all seven roles.
+The allocator enforces original `train` for training and original `test` for
+every other role, both at allocation and replay. Four-class counts use the
+declared label schema; unavailable counts fail rather than changing the design.
+Optional `--windows /path/to/window-requests.json --schedule-id <id>` emits
+the same immutable schedule format as YouTube and requires `--requests`.
+The CLI explicitly reports `protocol_frozen: false`.
+
+Current preparation candidates, with equal class counts within each role:
+
+| Role | AG News | YouTube |
+| --- | ---: | ---: |
+| Training | 3,000 | 300 |
+| Development | 100 | 50 |
+| Reference | 100 | 50 |
+| Calibration | 400 | 200 |
+| Threshold tuning | 1,000 | 200 |
+| Held-out stable | 500 | 250 |
+| Held-out evaluation | 1,000 | 500 |
+
+These are not G2 allocations or adequate false-alarm evidence budgets.
+AG News tuning supplies one disjoint ten-window, 100-example null horizon;
+YouTube tuning supplies only four 50-example windows. Replays do not create
+independent corpus observations. No held-out model outcomes are inspected.
+
+### Pinned task-checkpoint training
+
+Inventories now use schema 2 with explicit source partitions.
+`Inventory.from_artifact` verifies the complete inventory hash and rejects
+obsolete schemas; regenerate in a fresh directory rather than modifying old
+candidate artifacts. Allocations are revalidated before loading weights.
+
+```bash
+python -m experiments.research_extension.training \
+  --inventory /path/to/schema-2-inventory.json \
+  --allocation /path/to/roles.json \
+  --base-checkpoint /path/to/pinned-local-base \
+  --base-sha256 <checkpoint-fingerprint> \
+  --output /path/to/fresh-training-run \
+  --epochs 3 --batch-size 8 --max-tokens 128 \
+  --learning-rate 2e-5 --seed 42 --device cuda:0
+```
+
+Compute the base identity with
+`experiments.research_extension.reference_adapter.checkpoint_fingerprint`.
+Download public bases explicitly at an immutable revision before running;
+the trainer is local-only. Prepared base identities and upstream revisions are
+saved in the ignored `results/research-extension-data/base-checkpoints.json`.
+The selected sources are `google-bert/bert-base-uncased` at
+`86b5e0934494bd15c9632b12f734a8a67f723594` and `openai-community/gpt2` at
+`607a30d783dfa663caf39e06633721c8d4cfcd7e`.
+
+This is a new full-fine-tuning recipe, not a reproduction of historical
+LoRA/Trainer checkpoints: float32, no autocast or TF32, eager attention,
+deterministic algorithms, constant-rate AdamW and clipped gradients.
+Only training updates weights. Minimum development log loss selects the
+saved epoch; reference/tuning/held-out roles are never scored. BERT uses
+`2e-5` and GPT-2 uses `5e-5` in the local three-epoch preparation run.
+Both binary and four-class heads have their actual task labels; old four-class
+weights are not merely renamed ham/spam.
+
+Each fresh output saves the pre-inference training plan, selected
+`checkpoint/` (model and tokenizer), and `training.json`: content identities,
+role/group membership, software/source/settings, optimizer steps, development
+accuracy/recall/log loss/Brier score, elapsed time and peak allocated GPU bytes.
+Existing or partial output directories are refused, not silently resumed.
+Training provenance alone is not G1 qualification.
+
+
 ### Reference classifier development qualification
 
 `ReferenceAdapter` loads only local BERT/GPT-2 task checkpoints and hashes their
@@ -118,6 +201,10 @@ document-only IG, complete forward quantities, logits/probabilities, token
 metadata/truncation, last-layer document-mean embeddings, cost and runtime.
 GPT-2's classifier token index is fixed from the original IDs throughout IG;
 embedding-only default padding inference measures a different classifier.
+Completeness residuals use `math.fsum` over the actual persisted token values,
+not a separate float32 tensor reduction. This preserves cancellation accuracy
+and independently reproducible saved forward quantities. A changed extraction
+source requires fresh banks; failed diagnostic banks remain untouched.
 
 ```bash
 python -m experiments.research_extension.qualification \
@@ -133,6 +220,28 @@ saves exact banks plus a numerical/cost report. It refuses held-out roles and
 already extracted destinations. Passing these examples alone does not pass G1.
 Model extras and the separately installed endpoint numerical package are needed;
 this is not the later installed-package/G5 cutover.
+
+### Offline quality measures
+
+`experiments.research_extension.quality.classification_quality` consumes saved
+ordered raw logits, dense task labels, candidate IDs and the model's explicit
+temperature. It reports accuracy, observed-class balanced accuracy, per-class
+recall, fixed-prior standardized accuracy, log loss and multiclass Brier score.
+Log loss is computed from float64 log-softmax, without clipping probabilities
+that underflow to zero. No model or attribution calls occur.
+
+Supply `reference_recalls` from the same fixed model to estimate the
+composition-only accuracy expectation under the current empirical class prior.
+This distinguishes prior composition from within-class changes; it does not
+assume that a text shift causes degradation. Missing classes remain explicit:
+observed-class balanced accuracy is labeled accordingly; standardized or
+reference-composition expectations needing unavailable recalls are `None`,
+with the affected class indices reported.
+
+These are empirical point estimates, not group-aware intervals, underlying
+degradation claims, quality-event null qualification, or G2 freeze. Label-only
+controls reuse the exact same scores and alter host-side labels only.
+
 
 ## Remote Laya development and historical pilots
 
