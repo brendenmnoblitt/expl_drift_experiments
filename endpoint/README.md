@@ -138,6 +138,25 @@ alignment and candidate-logit completeness evidence does not qualify schema-2
 margin or embedding signals. The current image deployment is recorded in the
 root README; these historical results do not imply it.
 
+### Incomplete development attempt and fix
+
+- The October 13 YouTube development attempt used image
+  `sha256:80419fbb20ea42e6c8c1cafb29988c329c7c3b221dc6c6bb142abe8cfa2f49b5`
+  from workflow [38331632302](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38331632302).
+  Twenty requests completed; request 21 timed out after 900 seconds, and request
+  22 was not sent. No report or G1 pass was produced.
+- Repeated requests at each of batch sizes 1 and 4 matched exactly. Cross-batch
+  attributions differed by up to `0.0459985` against `1e-5` tolerances, despite
+  passing completeness checks. The batch-size-8 comparison is missing. Preserve
+  the logs and partial banks; do not resume them under another runtime.
+- Commit `b9d69a1` removes transport-batch-dependent model context: scoring,
+  representations, and fixed-margin IG execute per sample in a singleton
+  context. The endpoint suite passes (50 tests). A new immutable image is
+  building under workflow
+  [38389756154](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38389756154).
+  Fresh qualification is still required; no additional extraction is authorized
+  by this fix.
+
 ### Remote pilot check on October 10 2026
 
 - Image workflow: [38077186563](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38077186563);

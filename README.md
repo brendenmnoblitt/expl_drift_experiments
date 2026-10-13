@@ -76,8 +76,18 @@ Archived CUSUM/EWMA lead-time experiments are retained only as offline reference
 
 Active work is on `codex/research-extension`; the
 [execution plan](../expl_drift/docs/research-extension-plan-2026-10-11.md) defines
-G1–G5. No primary results, frozen protocol, new deployment or paid extraction
-are established by the development checks.
+G1–G5 remain open. One bounded schema-2 YouTube attempt on the prior runtime
+completed 20 requests; request 21 timed out at 900 s and request 22 was not
+sent. Cross-batch attribution exceeded tolerance, so no qualification report or
+G1 pass exists. Logs and partial banks remain under
+`results/research-extension-data/remote-laya-qualification-v2/`.
+
+Commit `b9d69a1` changes scoring, representations, and fixed-margin IG to
+singleton per-sample execution; endpoint tests pass (50). Its immutable image
+is building. No further extraction will run without renewed resource approval.
+The prior endpoint is paused. HF's listed L4 rate was $0.80/hour; the exact
+account charge is unavailable here. No held-out model outcomes, main merge, or
+paper-tag changes have occurred.
 
 ### Corrected corpus and immutable schedules
 
