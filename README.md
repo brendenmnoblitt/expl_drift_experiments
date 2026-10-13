@@ -89,18 +89,25 @@ was built by [workflow 38389756154](https://github.com/brendenmnoblitt/expl_drif
 and configured on the existing L4 x1 endpoint without scaling changes. Its
 `/health` returned schema 2 `ready` for the pinned Laya revision on NVIDIA L4.
 The runtime reports `configured_not_attested`.
-The user-approved YouTube-only development comparison completed: 22/22
-requests, no failures or retries, 25,344 actual gradient evaluations, and
-17.9 minutes of runner wall time. Across batch sizes 1/4/8 and two repeats,
-prediction parity passed and maximum absolute differences for logits,
-probabilities, representations, and attributions were all 0 at `atol=rtol=1e-5`.
-The report is
-`results/research-extension-data/remote-laya-qualification-v3/youtube-2026-10-13-singleton-b9d69a1/qualification.json`.
-This is bounded evidence for eight designated development examples only;
-G1 remains open. No AG News or held-out evaluation ran. The endpoint is paused.
-At the listed $0.80/hour, runner wall time estimates about $0.24 before startup,
-minimum, or other charges; the exact account bill is unavailable. Further
-inference requires fresh approval. No main merge or paper-tag changes occurred.
+The user-authorized YouTube development comparison completed 22/22 requests
+with 25,344 gradient evaluations and 17.9 minutes of runner time; the AG News
+comparison completed 66/66 requests with 47,232 evaluations and 34.7 minutes.
+Both compared eight designated development examples across batch sizes 1/4/8
+and two repeats. Prediction parity passed, and maximum absolute differences
+for logits, probabilities, representations, and attributions were all zero at
+`atol=rtol=1e-5`. Reports:
+`results/research-extension-data/remote-laya-qualification-v3/youtube-2026-10-13-singleton-b9d69a1/qualification.json`
+and
+`results/research-extension-data/remote-laya-qualification-v3/ag-news-2026-10-13-singleton-b9d69a1/qualification.json`.
+
+The endpoint reports different checkpoint-artifact fingerprints across these
+restarts despite the same configured image and pinned model revision. Keep the
+two runs separate; do not claim one same-runtime cross-task result until this
+fingerprint variance is resolved. Neither bounded check establishes G1. No
+held-out evaluation ran; the endpoint is paused. At the listed $0.80/hour, the
+two runner intervals estimate about $0.70 total before startup/minimums or other
+charges; the exact account bill is unavailable. No main merge or paper tags
+changed.
 
 ### Corrected corpus and immutable schedules
 
@@ -347,15 +354,25 @@ approval was received for the separate run below.
 The endpoint now executes scoring, representation, and fixed-margin IG in a
 singleton context per sample. The new image was built from `b9d69a1`,
 configured on the existing L4 x1 endpoint, health-checked, then paused.
-User-approved bounded run
+The singleton-runtime YouTube run
 `results/research-extension-data/remote-laya-qualification-v3/youtube-2026-10-13-singleton-b9d69a1/`
 completed 22/22 requests with no retries, 25,344 gradient evaluations, and
-17.9 minutes of runner wall time. Across batch sizes 1/4/8 and two repeats,
-predictions matched and the maximum absolute difference was exactly zero for
-logits, probabilities, representations, and attributions at `1e-5` tolerances.
-See `qualification.json` and `attempt-summary.json`. This proves batch
-reproducibility only for the eight designated development examples and exact
-runtime; G1 remains open. No AG News or held-out evaluation ran.
+17.9 minutes of runner wall time. The AG News run
+`results/research-extension-data/remote-laya-qualification-v3/ag-news-2026-10-13-singleton-b9d69a1/`
+completed 66/66 requests, 47,232 gradient evaluations, and 34.7 minutes of
+runner wall time. Both compared eight designated development examples at
+batch sizes 1/4/8 with two repeats; predictions matched and all maximum
+absolute signal discrepancies were zero at `atol=rtol=1e-5`. See each
+`qualification.json`, its request/response/event artifacts, and
+`attempt-summary.json`.
+
+The endpoint returned different checkpoint-artifact fingerprints across the
+two restarts (`35b599d63dfa3816f29a8c1280499560e4950b5a5ebf6b75d1437a2769e1abd1`
+for YouTube and
+`f81510fe53d225e1553f302b08fc724752b1c535cc6c0325320dd33dcb7f3c1a`
+for AG News), despite the same image digest and pinned model revision. Treat
+the runs separately; neither establishes same-runtime cross-task qualification
+or G1. No held-out evaluation ran. The endpoint is paused.
 
 The interrupted local native-SDK artifacts under
 `results/research-extension-data/native-laya-qualification-v2/` are preserved

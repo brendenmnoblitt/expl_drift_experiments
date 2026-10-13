@@ -157,17 +157,20 @@ root README; these historical results do not imply it.
   [38389756154](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38389756154)
   and configured on the existing L4 x1 endpoint without changing scaling. Its
   runtime reports `configured_not_attested`. `/health` returned schema 2 `ready`
-  for the pinned model on NVIDIA L4; the endpoint was paused and later resumed
-  for the approved YouTube development rerun at
-  `../results/research-extension-data/remote-laya-qualification-v3/youtube-2026-10-13-singleton-b9d69a1/`.
-  All 22 requests completed with no retries; 25,344 actual gradient evaluations
-  used (786,432 approved ceiling, 960 maximum for one target/example). Across
-  batch sizes 1, 4, and 8, two repeats produced prediction parity and exact
-  agreement for logits, probabilities, representations, and attributions at
-  `1e-5` tolerances. Full report:
-  `../results/research-extension-data/remote-laya-qualification-v3/youtube-2026-10-13-singleton-b9d69a1/qualification.json`.
-  This eight-example development comparison does not establish G1. The endpoint
-  was paused after completion. Any further extraction requires renewed approval.
+  for the pinned model on NVIDIA L4. The user-authorized YouTube development
+  rerun at
+  `../results/research-extension-data/remote-laya-qualification-v3/youtube-2026-10-13-singleton-b9d69a1/`
+  completed 22/22 requests with no retries and 25,344 actual gradient
+  evaluations (786,432 cap). The AG News development comparison at
+  `../results/research-extension-data/remote-laya-qualification-v3/ag-news-2026-10-13-singleton-b9d69a1/`
+  completed 66/66 requests, 47,232 actual evaluations (2,359,296 cap), no
+  retries. Each run covered eight examples, batch sizes 1/4/8, and two repeats;
+  each had prediction parity and zero maximum absolute signal differences at
+  `1e-5` tolerances. However, their checkpoint-artifact fingerprints differ
+  (`35b599d63dfa3816f29a8c1280499560e4950b5a5ebf6b75d1437a2769e1abd1` vs
+  `f81510fe53d225e1553f302b08fc724752b1c535cc6c0325320dd33dcb7f3c1a`).
+  Keep reports separate; neither establishes same-runtime cross-task
+  qualification or G1. No held-out evaluation ran. The endpoint is paused.
 
 ### Remote pilot check on October 10 2026
 
