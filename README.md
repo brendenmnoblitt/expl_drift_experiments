@@ -310,11 +310,15 @@ identity as configured, not independently attested.
 
 The subsequent YouTube development run is incomplete:
 `results/research-extension-data/remote-laya-qualification-v2/youtube-2026-10-13/`.
-Twenty requests completed and their responses were persisted; request 21
-timed out after 900 seconds. The request failure and all completed outcomes are
-in `events.jsonl`; no retry, resume, report, or G1 qualification was recorded.
-The endpoint is paused. A future attempt requires fresh resource approval and
-a new output directory; preserve this partial run as historical evidence.
+Twenty requests completed and their responses were persisted; request 21 timed
+out after 900 seconds, and request 22 was not sent. Repeats were exactly
+identical within batch sizes 1 and 4. The cross-batch comparison failed:
+predictions, logits, probabilities and document representations met the
+comparison tolerances, but attribution values differed by up to 0.046.
+All 32 available completeness checks passed; completed responses reported
+16,992 gradient evaluations. No retry, resume, full comparison report, or G1
+qualification was recorded; the endpoint is paused. A future attempt requires
+fresh resource approval and a new output directory; preserve this partial run.
 
 The interrupted local native-SDK artifacts under
 `results/research-extension-data/native-laya-qualification-v2/` are preserved
