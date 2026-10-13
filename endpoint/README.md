@@ -157,9 +157,17 @@ root README; these historical results do not imply it.
   [38389756154](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38389756154)
   and configured on the existing L4 x1 endpoint without changing scaling. Its
   runtime reports `configured_not_attested`. `/health` returned schema 2 `ready`
-  for the pinned model on NVIDIA L4; the endpoint was paused immediately
-  afterward. No extraction was sent. Fresh qualification requires separate
-  resource approval.
+  for the pinned model on NVIDIA L4; the endpoint was paused and later resumed
+  for the approved YouTube development rerun at
+  `../results/research-extension-data/remote-laya-qualification-v3/youtube-2026-10-13-singleton-b9d69a1/`.
+  All 22 requests completed with no retries; 25,344 actual gradient evaluations
+  used (786,432 approved ceiling, 960 maximum for one target/example). Across
+  batch sizes 1, 4, and 8, two repeats produced prediction parity and exact
+  agreement for logits, probabilities, representations, and attributions at
+  `1e-5` tolerances. Full report:
+  `../results/research-extension-data/remote-laya-qualification-v3/youtube-2026-10-13-singleton-b9d69a1/qualification.json`.
+  This eight-example development comparison does not establish G1. The endpoint
+  was paused after completion. Any further extraction requires renewed approval.
 
 ### Remote pilot check on October 10 2026
 

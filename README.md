@@ -87,12 +87,20 @@ singleton per-sample execution; endpoint tests pass (50). Its immutable image
 `sha256:4c47ca3bb84b75f84c4a4a3bfbe8db79923205f58602ce34dbd6abe415077725`
 was built by [workflow 38389756154](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38389756154)
 and configured on the existing L4 x1 endpoint without scaling changes. Its
-`/health` returned schema 2 `ready` for the pinned Laya revision on an NVIDIA
-L4. The runtime reports `configured_not_attested`; no extraction was sent, and
-the endpoint is paused again. At the listed $0.80/hour, its ~2.6-minute
-health-only startup estimates about $0.04 before any minimum or other charges;
-the exact account bill is unavailable. No held-out model outcomes, main merge,
-or paper-tag changes have occurred.
+`/health` returned schema 2 `ready` for the pinned Laya revision on NVIDIA L4.
+The runtime reports `configured_not_attested`.
+The user-approved YouTube-only development comparison completed: 22/22
+requests, no failures or retries, 25,344 actual gradient evaluations, and
+17.9 minutes of runner wall time. Across batch sizes 1/4/8 and two repeats,
+prediction parity passed and maximum absolute differences for logits,
+probabilities, representations, and attributions were all 0 at `atol=rtol=1e-5`.
+The report is
+`results/research-extension-data/remote-laya-qualification-v3/youtube-2026-10-13-singleton-b9d69a1/qualification.json`.
+This is bounded evidence for eight designated development examples only;
+G1 remains open. No AG News or held-out evaluation ran. The endpoint is paused.
+At the listed $0.80/hour, runner wall time estimates about $0.24 before startup,
+minimum, or other charges; the exact account bill is unavailable. Further
+inference requires fresh approval. No main merge or paper-tag changes occurred.
 
 ### Corrected corpus and immutable schedules
 
@@ -331,14 +339,23 @@ identical within batch sizes 1 and 4. The cross-batch comparison failed:
 predictions, logits, probabilities and document representations met the
 comparison tolerances, but attribution values differed by up to 0.046.
 All 32 available completeness checks passed; completed responses reported
-16,992 gradient evaluations. No retry, resume, full comparison report, or G1
-qualification was recorded; the endpoint is paused. A future attempt requires
-fresh resource approval and a new output directory; preserve this partial run.
+16,992 gradient evaluations. No retry or resume occurred; no full comparison
+report or G1 qualification was produced. The endpoint was paused; preserve the
+partial outputs and never resume them under the changed runtime. Fresh resource
+approval was received for the separate run below.
 
-The endpoint source now runs each sample's scoring, representation and
-attribution in a singleton model context, independent of request grouping. That
-source change requires a new immutable image and fresh runtime qualification;
-the partial outputs above remain tied to the prior image and are not reused.
+The endpoint now executes scoring, representation, and fixed-margin IG in a
+singleton context per sample. The new image was built from `b9d69a1`,
+configured on the existing L4 x1 endpoint, health-checked, then paused.
+User-approved bounded run
+`results/research-extension-data/remote-laya-qualification-v3/youtube-2026-10-13-singleton-b9d69a1/`
+completed 22/22 requests with no retries, 25,344 gradient evaluations, and
+17.9 minutes of runner wall time. Across batch sizes 1/4/8 and two repeats,
+predictions matched and the maximum absolute difference was exactly zero for
+logits, probabilities, representations, and attributions at `1e-5` tolerances.
+See `qualification.json` and `attempt-summary.json`. This proves batch
+reproducibility only for the eight designated development examples and exact
+runtime; G1 remains open. No AG News or held-out evaluation ran.
 
 The interrupted local native-SDK artifacts under
 `results/research-extension-data/native-laya-qualification-v2/` are preserved
