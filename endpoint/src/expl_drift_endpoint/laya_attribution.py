@@ -206,8 +206,8 @@ def _forward(agent: Any, batch: Mapping[str, Any], embeddings: Any = None, *, ca
             handle.remove()
 
 
-def encode_batch(agent: Any, request: Any):
-    """Use the pinned SDK serialization and collator for both scoring and IG."""
+def encode_samples(agent: Any, request: Any):
+    """Encode request samples, then collate each in the fixed singleton context."""
     from laya.common import collate_items
 
     question = {
@@ -220,15 +220,19 @@ def encode_batch(agent: Any, request: Any):
     internal = {"expl_drift_target": agent._to_internal(question)}
     items = [
         agent._encode_state(
-            sample.text, ["expl_drift_target"], internal,
-            max_len=request.max_tokens, head_max_len=int(agent.cfg.get("head_max_len", 192)),
+            sample.text,
+            ["expl_drift_target"],
+            internal,
+            max_len=request.max_tokens,
+            head_max_len=int(agent.cfg.get("head_max_len", 192)),
         )[0]
         for sample in request.samples
     ]
     pad_id = agent.tok.pad_token_id
     if pad_id is None:
         raise ValueError("Laya tokenizer must define a pad token for the document baseline")
-    return items, collate_items([[item] for item in items], pad_id)
+    batches = [collate_items([[item]], pad_id) for item in items]
+    return items, batches
 
 
 def token_signal(agent: Any, item: Mapping[str, Any], candidate_ids: Sequence[str]) -> TokenSignal:
@@ -282,20 +286,21 @@ def explain_margin(
     tokens: TokenSignal,
     target: Any,
     candidate_ids: Sequence[str],
-    row: int,
     direct_logits: Any,
     *,
     n_steps: int,
 ) -> AttributionSignal:
-    """Explain a fixed raw-logit difference in the exact scoring batch context."""
+    """Explain one sample's fixed margin in the singleton scoring context."""
     import torch
 
     target_index = candidate_ids.index(target.target_candidate_id)
     reference_index = candidate_ids.index(target.reference_candidate_id)
     input_ids = batch["input_ids"].to(agent.device)
+    if input_ids.shape[0] != 1:
+        raise ValueError("integrated gradients requires a singleton model context")
     start, end = tokens.state_token_start, tokens.state_token_start + tokens.state_token_count
     baseline_ids = input_ids.clone()
-    baseline_ids[row, start:end] = agent.tok.pad_token_id
+    baseline_ids[0, start:end] = agent.tok.pad_token_id
     word_embeddings = agent.model.encoder.get_input_embeddings()
     with torch.no_grad():
         input_embeds = word_embeddings(input_ids).detach()
@@ -306,7 +311,7 @@ def explain_margin(
         raise RuntimeError("Laya embedding path changed the reported decision logits")
 
     def quantity(logits):
-        return logits[row, target_index] - logits[row, reference_index]
+        return logits[0, target_index] - logits[0, reference_index]
 
     input_value = float(quantity(input_logits).cpu().item())
     baseline_value = float(quantity(baseline_logits).cpu().item())
@@ -325,7 +330,7 @@ def explain_margin(
     )
     if not torch.isfinite(attributions).all():
         raise RuntimeError("Laya Integrated Gradients produced non-finite values")
-    values = attributions.sum(dim=-1)[row].detach().cpu().tolist()
+    values = attributions.sum(dim=-1)[0].detach().cpu().tolist()
     values.extend([0.0] * (tokens.token_width - len(values)))
     import math
 

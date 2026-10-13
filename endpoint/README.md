@@ -78,9 +78,10 @@ responses. It does not exercise Laya or qualify the model-runtime image.
 
 ## Input contract
 
-Schema version `2` accepts one instruction and ordered candidate set for an
-exact execution batch. It pins model/tokenizer snapshots, the observed `/health`
-runtime, `precision="float32_no_autocast"`,
+Schema version `2` accepts one instruction and ordered candidate set per request.
+Every sample is collated and executed independently in a fixed singleton context,
+regardless of its transport batch size. It pins model/tokenizer snapshots, the
+observed `/health` runtime, `precision="float32_no_autocast"`,
 `tokenization="laya_sdk_0.3.29_encode_state"`, and
 `pooling="document_mean_last_hidden_state"`. `decision_target` specifies
 `target_semantics="fixed_candidate_margin"`, `target_candidate_id`, and a
@@ -92,13 +93,14 @@ unknown targets, and scalar coercions are rejected. Transport bounds remain
 the loaded model's `max_len`.
 
 Every sample returns ordered raw logits, unrounded probabilities computed from
-the same forward logits and its saved SDK probability temperature, a fixed
-margin value, and aligned token/segment/truncation metadata. Requested
-representations average the encoder's last hidden state over document tokens
-only; no retained document tokens means an error, not a fabricated embedding.
-IG uses the same batch context, embedding path, raw decision head and float32
-arithmetic. It saves signed values, input/baseline target values, requested steps,
-actual gradient evaluations, and the residual:
+the same per-sample forward logits and its saved SDK probability temperature, a
+fixed margin value, and aligned token/segment/truncation metadata. Requested
+representations average that singleton forward's encoder state over document
+tokens only; no retained document tokens means an error, not a fabricated
+embedding. Integrated gradients use the same singleton context, embedding path,
+raw decision head and float32 arithmetic, without re-evaluating unrelated request
+samples at each integration step. It saves signed values, input/baseline target
+values, requested steps, actual gradient evaluations, and the residual:
 
 `input_target_value - baseline_target_value - sum(document_attributions)`.
 

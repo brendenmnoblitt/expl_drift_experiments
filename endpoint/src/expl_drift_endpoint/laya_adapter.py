@@ -164,7 +164,7 @@ class LayaAdapter:
         from expl_drift_endpoint.laya_attribution import (
             _forward,
             document_mean,
-            encode_batch,
+            encode_samples,
             explain_margin,
             token_signal,
         )
@@ -175,14 +175,14 @@ class LayaAdapter:
         reference_index = candidate_ids.index(request.decision_target.reference_candidate_id)
         outputs = []
         with self._inference_lock:
-            items, batch = encode_batch(self._agent, request)
-            with torch.no_grad():
-                logits, hidden = _forward(self._agent, batch, capture=request.representations)
-            if logits.shape != (len(request.samples), len(candidate_ids)):
-                raise InvalidModelOutput("SDK raw-logit shape differs from ordered request")
-            if not torch.isfinite(logits).all():
-                raise InvalidModelOutput("SDK decision logits must be finite")
-            for row, (sample, item) in enumerate(zip(request.samples, items, strict=True)):
+            items, sample_batches = encode_samples(self._agent, request)
+            for sample, item, batch in zip(request.samples, items, sample_batches, strict=True):
+                with torch.no_grad():
+                    logits, hidden = _forward(self._agent, batch, capture=request.representations)
+                if logits.shape != (1, len(candidate_ids)):
+                    raise InvalidModelOutput("SDK raw-logit shape differs from ordered request")
+                if not torch.isfinite(logits).all():
+                    raise InvalidModelOutput("SDK decision logits must be finite")
                 tokens = token_signal(self._agent, item, candidate_ids)
                 qt = item["qtype"]
                 temperature = float(
@@ -194,8 +194,8 @@ class LayaAdapter:
                     raise InvalidModelOutput(
                         "SDK probability temperature must be finite and positive"
                     )
-                probabilities = torch.softmax(logits[row] / temperature, dim=-1).cpu().tolist()
-                raw = logits[row].cpu().tolist()
+                probabilities = torch.softmax(logits[0] / temperature, dim=-1).cpu().tolist()
+                raw = logits[0].cpu().tolist()
                 attribution = None
                 if request.attribution is not None:
                     attribution = explain_margin(
@@ -204,7 +204,6 @@ class LayaAdapter:
                         tokens,
                         request.decision_target,
                         candidate_ids,
-                        row,
                         logits,
                         n_steps=request.attribution.n_steps,
                     )
@@ -212,12 +211,12 @@ class LayaAdapter:
                 if request.representations:
                     representation = RepresentationSignal(
                         pooling=request.pooling,
-                        values=document_mean(hidden, row, tokens).detach().cpu().tolist(),
+                        values=document_mean(hidden, 0, tokens).detach().cpu().tolist(),
                     )
                 outputs.append(
                     SampleScores(
                         sample_id=sample.sample_id,
-                        predicted_candidate_id=candidate_ids[int(logits[row].argmax().item())],
+                        predicted_candidate_id=candidate_ids[int(logits[0].argmax().item())],
                         scores=[
                             CandidateScore(
                                 candidate_id=cid, logit=float(logit), probability=float(p)
@@ -226,7 +225,7 @@ class LayaAdapter:
                         ],
                         probability_temperature=temperature,
                         target_value=float(
-                            (logits[row, target_index] - logits[row, reference_index]).item()
+                            (logits[0, target_index] - logits[0, reference_index]).item()
                         ),
                         tokens=tokens,
                         attribution=attribution,

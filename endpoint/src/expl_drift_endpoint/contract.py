@@ -19,7 +19,7 @@ ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
 def request_fingerprint(request: "ExtractionRequest") -> str:
-    """Include the complete ordered execution batch; no batch invariance is presumed."""
+    """Fingerprint the full request batch; model execution is singleton per sample."""
     payload = json.dumps(
         request.model_dump(mode="json", exclude_unset=True),
         ensure_ascii=False,

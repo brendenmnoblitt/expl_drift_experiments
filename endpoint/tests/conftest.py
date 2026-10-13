@@ -109,7 +109,8 @@ def fake_agent(monkeypatch):
 
         def forward(self, input_ids, attention_mask, marker_pos, marker_mask, qtype):
             hidden = self.encoder(input_ids, attention_mask).last_hidden_state
-            value = hidden[:, 3:5, 0].sum(dim=1)
+            # Synthetic backend sensitivity makes request grouping observable.
+            value = hidden[:, 3:5, 0].sum(dim=1) * (1.0 + 0.001 * (len(input_ids) - 1))
             return torch.stack([-value, value * 3], dim=1), torch.zeros((len(value), 2))
 
     class Tokenizer:

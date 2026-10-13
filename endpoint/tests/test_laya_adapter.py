@@ -41,6 +41,21 @@ def test_fixed_signed_margin_and_document_pool_share_forward_function(
         )
 
 
+def test_sample_outputs_are_invariant_to_request_batch_grouping(
+    request_payload, runtime_identity, fake_agent
+):
+    adapter = LayaAdapter(fake_agent, "/fixture", runtime=runtime_identity)
+    grouped = adapter.extract(ExtractionRequest.model_validate(request_payload))
+
+    for index, grouped_sample in enumerate(grouped.samples):
+        single_payload = copy.deepcopy(request_payload)
+        single_payload["request_id"] = f"request-single-{index}"
+        single_payload["samples"] = [request_payload["samples"][index]]
+        single = adapter.extract(ExtractionRequest.model_validate(single_payload))
+
+        assert grouped_sample.model_dump(mode="json") == single.samples[0].model_dump(mode="json")
+
+
 @pytest.mark.parametrize("field", ["model", "runtime"])
 def test_different_checkpoint_or_runtime_cannot_execute(
     request_payload, runtime_identity, fake_agent, field

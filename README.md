@@ -320,6 +320,11 @@ All 32 available completeness checks passed; completed responses reported
 qualification was recorded; the endpoint is paused. A future attempt requires
 fresh resource approval and a new output directory; preserve this partial run.
 
+The endpoint source now runs each sample's scoring, representation and
+attribution in a singleton model context, independent of request grouping. That
+source change requires a new immutable image and fresh runtime qualification;
+the partial outputs above remain tied to the prior image and are not reused.
+
 The interrupted local native-SDK artifacts under
 `results/research-extension-data/native-laya-qualification-v2/` are preserved
 as historical diagnostics. They are not resumed, merged with endpoint output,
