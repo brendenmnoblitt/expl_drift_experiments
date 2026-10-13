@@ -151,11 +151,15 @@ root README; these historical results do not imply it.
   the logs and partial banks; do not resume them under another runtime.
 - Commit `b9d69a1` removes transport-batch-dependent model context: scoring,
   representations, and fixed-margin IG execute per sample in a singleton
-  context. The endpoint suite passes (50 tests). A new immutable image is
-  building under workflow
-  [38389756154](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38389756154).
-  Fresh qualification is still required; no additional extraction is authorized
-  by this fix.
+  context. The endpoint suite passes (50 tests). Image
+  `sha256:4c47ca3bb84b75f84c4a4a3bfbe8db79923205f58602ce34dbd6abe415077725`
+  was built under workflow
+  [38389756154](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38389756154)
+  and configured on the existing L4 x1 endpoint without changing scaling. Its
+  runtime reports `configured_not_attested`. `/health` returned schema 2 `ready`
+  for the pinned model on NVIDIA L4; the endpoint was paused immediately
+  afterward. No extraction was sent. Fresh qualification requires separate
+  resource approval.
 
 ### Remote pilot check on October 10 2026
 

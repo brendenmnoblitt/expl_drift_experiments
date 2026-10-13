@@ -84,10 +84,15 @@ G1 pass exists. Logs and partial banks remain under
 
 Commit `b9d69a1` changes scoring, representations, and fixed-margin IG to
 singleton per-sample execution; endpoint tests pass (50). Its immutable image
-is building. No further extraction will run without renewed resource approval.
-The prior endpoint is paused. HF's listed L4 rate was $0.80/hour; the exact
-account charge is unavailable here. No held-out model outcomes, main merge, or
-paper-tag changes have occurred.
+`sha256:4c47ca3bb84b75f84c4a4a3bfbe8db79923205f58602ce34dbd6abe415077725`
+was built by [workflow 38389756154](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38389756154)
+and configured on the existing L4 x1 endpoint without scaling changes. Its
+`/health` returned schema 2 `ready` for the pinned Laya revision on an NVIDIA
+L4. The runtime reports `configured_not_attested`; no extraction was sent, and
+the endpoint is paused again. At the listed $0.80/hour, its ~2.6-minute
+health-only startup estimates about $0.04 before any minimum or other charges;
+the exact account bill is unavailable. No held-out model outcomes, main merge,
+or paper-tag changes have occurred.
 
 ### Corrected corpus and immutable schedules
 
