@@ -61,9 +61,10 @@ through organization secrets), and the account must be able to push the image.
 The job summary reports the immutable `@sha256:...` image reference. No HF
 endpoint is created or changed by this workflow.
 
-Use the immutable digest, not the tag, when configuring an HF endpoint. The
-workflow has published the model-runtime image; endpoint image pull access was
-verified on the research endpoint.
+Use the immutable digest, not the tag, when configuring an HF endpoint. Set
+`model.env.LAYA_ENDPOINT_IMAGE_DIGEST` to the same `sha256:...` value in the
+endpoint update; the model service fails startup if this required value is
+missing. This configured identity is not independently attested.
 
 With the local CPU container running, execute the same smoke check from a second
 terminal in this directory:
@@ -132,7 +133,8 @@ immutable runtime before primary extraction.
 
 The schema-1 pilots below predate this implementation. Their finite-value,
 alignment and candidate-logit completeness evidence does not qualify schema-2
-margin or embedding signals, and no new image publication/deployment is implied.
+margin or embedding signals. The current image deployment is recorded in the
+root README; these historical results do not imply it.
 
 ### Remote pilot check on October 10 2026
 

@@ -267,7 +267,7 @@ export HF_TOKEN="<read token for the private endpoint>"
 python -m experiments.research_extension.laya_qualification \
   --task youtube \
   --development-json results/research-extension-data/youtube-v2/bounded-development-qualification.json \
-  --output results/research-extension-data/remote-laya-qualification-v1/youtube \
+  --output results/research-extension-data/remote-laya-qualification-v3/youtube-<unique-run-id> \
   --allow-remote-execution
 ```
 
@@ -277,7 +277,7 @@ AG News uses a separate run:
 python -m experiments.research_extension.laya_qualification \
   --task ag_news \
   --development-json results/research-extension-data/ag-news/bounded-development-qualification.json \
-  --output results/research-extension-data/remote-laya-qualification-v1/ag-news \
+  --output results/research-extension-data/remote-laya-qualification-v3/ag-news-<unique-run-id> \
   --allow-remote-execution
 ```
 
@@ -295,19 +295,34 @@ pass G1.
 Preflight of the supplied HF endpoint on 2026-10-12 found it paused. After
 explicit restart approval, `/health` returned schema 1 for the pinned Laya
 revision, with only `decision_scores` and `integrated_gradients`; it supplied
-no image digest and does not implement the schema-2 fixed-margin and document
-representation contract. The endpoint was paused again without extraction.
-The redacted record is
+no image digest and did not implement the schema-2 fixed-margin and document
+representation contract. That historical preflight is preserved at
 `results/research-extension-data/remote-laya-qualification-v1/youtube-preflight-2026-10-12.json`.
-Do not run the schema-2 qualifier against this endpoint state. Deploying or
-reconfiguring an endpoint requires a separate resource decision.
+
+With subsequent deployment approval, the existing `laya-egk` endpoint was
+updated to the schema-2 image built from commit
+`e9850308794b938c2423e5d0f8eb1241b0cf73a1` (GitHub Actions run
+`38331632302`, digest
+`sha256:80419fbb20ea42e6c8c1cafb29988c329c7c3b221dc6c6bb142abe8cfa2f49b5`).
+Its hardware and scaling configuration were preserved. Readiness verified the
+pinned Laya revision and schema-2 capabilities. The runtime reports image
+identity as configured, not independently attested.
+
+The subsequent YouTube development run is incomplete:
+`results/research-extension-data/remote-laya-qualification-v2/youtube-2026-10-13/`.
+Twenty requests completed and their responses were persisted; request 21
+timed out after 900 seconds. The request failure and all completed outcomes are
+in `events.jsonl`; no retry, resume, report, or G1 qualification was recorded.
+The endpoint is paused. A future attempt requires fresh resource approval and
+a new output directory; preserve this partial run as historical evidence.
 
 The interrupted local native-SDK artifacts under
 `results/research-extension-data/native-laya-qualification-v2/` are preserved
 as historical diagnostics. They are not resumed, merged with endpoint output,
 or accepted as endpoint qualification.
 
-Configure a separately approved immutable schema-2 model-runtime image:
+A separate exploratory pilot runner is not the bounded qualifier above; it
+requires its own explicit request/cost approval and a fresh output path:
 
 ```bash
 export LAYA_ENDPOINT_URL="https://<endpoint-url>"
@@ -319,7 +334,8 @@ python -m experiments.laya_endpoint.runner --profile pilot
 
 Capabilities report implementation availability, not qualification. Changed
 runtime, image, source, text, target or batch context cannot resume a run.
-No deployment or remote extraction has been performed for schema 2.
+Schema-2 endpoint deployment and extraction have since been performed as
+recorded above; the capability list alone still does not establish qualification.
 
 The following results are historical schema-1 candidate-logit pilots using the
 old text/sampling/metric definitions, not corrected margin evidence.
