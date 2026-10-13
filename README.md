@@ -100,11 +100,18 @@ for logits, probabilities, representations, and attributions were all zero at
 and
 `results/research-extension-data/remote-laya-qualification-v3/ag-news-2026-10-13-singleton-b9d69a1/qualification.json`.
 
-The endpoint reports different checkpoint-artifact fingerprints across these
-restarts despite the same configured image and pinned model revision. Keep the
-two runs separate; do not claim one same-runtime cross-task result until this
-fingerprint variance is resolved. Neither bounded check establishes G1. No
-held-out evaluation ran; the endpoint is paused. At the listed $0.80/hour, the
+The YouTube and AG News runs have different checkpoint-artifact fingerprints
+despite the same configured image and pinned model revision. A separate
+health-only cold start returned a third fingerprint
+(`a3f80ff3984e86b0d48879cbfed9c8bd4025d5f0c8e8729227a1d7f653d23b01`; prior
+run values: `35b599d63dfa3816f29a8c1280499560e4950b5a5ebf6b75d1437a2769e1abd1`
+and `f81510fe53d225e1553f302b08fc724752b1c535cc6c0325320dd33dcb7f3c1a`).
+No extraction ran during that check; the endpoint was paused. The runtime
+currently hashes all non-hidden files under `/repository` after model
+initialization; the source of the variance remains unknown. Keep the task runs
+separate and do not claim same-runtime cross-task qualification until identity
+is stable. Neither bounded check establishes G1. No held-out evaluation ran.
+The endpoint remains paused. At the listed $0.80/hour, the
 two runner intervals estimate about $0.70 total before startup/minimums or other
 charges; the exact account bill is unavailable. No main merge or paper tags
 changed.
@@ -366,13 +373,19 @@ absolute signal discrepancies were zero at `atol=rtol=1e-5`. See each
 `qualification.json`, its request/response/event artifacts, and
 `attempt-summary.json`.
 
-The endpoint returned different checkpoint-artifact fingerprints across the
-two restarts (`35b599d63dfa3816f29a8c1280499560e4950b5a5ebf6b75d1437a2769e1abd1`
-for YouTube and
-`f81510fe53d225e1553f302b08fc724752b1c535cc6c0325320dd33dcb7f3c1a`
-for AG News), despite the same image digest and pinned model revision. Treat
-the runs separately; neither establishes same-runtime cross-task qualification
-or G1. No held-out evaluation ran. The endpoint is paused.
+The endpoint returned different checkpoint-artifact fingerprints across
+restarts (`35b599d63dfa3816f29a8c1280499560e4950b5a5ebf6b75d1437a2769e1abd1`
+for YouTube,
+`f81510fe53d225e1553f302b08fc724752b1c535cc6c0325320dd33dcb7f3c1a` for AG
+News). A health-only cold-start check at
+`results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-13/`
+returned a third hash,
+`a3f80ff3984e86b0d48879cbfed9c8bd4025d5f0c8e8729227a1d7f653d23b01`;
+zero extraction requests were made, and the endpoint was paused. Runtime
+identity hashes every non-hidden file under `/repository` after model
+initialization; the source of the variance remains unknown. Keep the task runs
+separate; neither establishes same-runtime cross-task qualification or G1. No
+held-out evaluation ran.
 
 The interrupted local native-SDK artifacts under
 `results/research-extension-data/native-laya-qualification-v2/` are preserved

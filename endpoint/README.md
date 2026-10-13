@@ -166,11 +166,18 @@ root README; these historical results do not imply it.
   completed 66/66 requests, 47,232 actual evaluations (2,359,296 cap), no
   retries. Each run covered eight examples, batch sizes 1/4/8, and two repeats;
   each had prediction parity and zero maximum absolute signal differences at
-  `1e-5` tolerances. However, their checkpoint-artifact fingerprints differ
-  (`35b599d63dfa3816f29a8c1280499560e4950b5a5ebf6b75d1437a2769e1abd1` vs
-  `f81510fe53d225e1553f302b08fc724752b1c535cc6c0325320dd33dcb7f3c1a`).
-  Keep reports separate; neither establishes same-runtime cross-task
-  qualification or G1. No held-out evaluation ran. The endpoint is paused.
+  `1e-5` tolerances. However, the YouTube and AG News checkpoint-artifact
+  fingerprints differ (`35b599d63dfa3816f29a8c1280499560e4950b5a5ebf6b75d1437a2769e1abd1`
+  and `f81510fe53d225e1553f302b08fc724752b1c535cc6c0325320dd33dcb7f3c1a`).
+  A health-only cold-start check at
+  `../results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-13/`
+  returned a third fingerprint,
+  `a3f80ff3984e86b0d48879cbfed9c8bd4025d5f0c8e8729227a1d7f653d23b01`;
+  it issued zero extraction requests. Runtime identity hashes every
+  non-hidden file under `/repository` after Laya initialization, and the
+  cause of the variance is unresolved. Keep reports separate; no same-runtime
+  cross-task claim or G1 is established. No held-out evaluation ran. The
+  endpoint is paused.
 
 ### Remote pilot check on October 10 2026
 
