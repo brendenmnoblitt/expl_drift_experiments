@@ -40,7 +40,7 @@ def main() -> None:
     # Synthetic revisions exercise the contract without loading a model.
     revision = {"repository": "fixture/model", "revision": "a" * 40}
     payload = {
-        "schema_version": "2",
+        "schema_version": "3",
         "request_id": "container-smoke",
         "run_id": "ci-smoke",
         "window_index": 0,
@@ -64,7 +64,7 @@ def main() -> None:
         "pooling": "document_mean_last_hidden_state",
         "runtime": {
             "implementation_sha256": "c" * 64,
-            "checkpoint_artifact_sha256": "d" * 64,
+            "model_state_sha256": "d" * 64,
             "sdk_version": "fixture", "torch_version": "fixture",
             "transformers_version": "fixture", "python_version": "fixture",
             "device": "cpu", "cuda_version": None, "gpu_name": None,

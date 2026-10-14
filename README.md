@@ -106,12 +106,14 @@ health-only cold start returned a third fingerprint
 (`a3f80ff3984e86b0d48879cbfed9c8bd4025d5f0c8e8729227a1d7f653d23b01`; prior
 run values: `35b599d63dfa3816f29a8c1280499560e4950b5a5ebf6b75d1437a2769e1abd1`
 and `f81510fe53d225e1553f302b08fc724752b1c535cc6c0325320dd33dcb7f3c1a`).
-No extraction ran during that check; the endpoint was paused. The runtime
-currently hashes all non-hidden files under `/repository` after model
-initialization; the source of the variance remains unknown. Keep the task runs
-separate and do not claim same-runtime cross-task qualification until identity
-is stable. Neither bounded check establishes G1. No held-out evaluation ran.
-The endpoint remains paused. At the listed $0.80/hour, the
+No extraction ran during that check; the endpoint was paused. The old runtime
+fingerprint covered all non-hidden `/repository` files. The saved reports lack
+per-file hashes, so the differing path cannot be identified. The endpoint now
+has an un-deployed schema-3 change that fingerprints loaded model-state tensors
+instead. Deploy and repeat runtime checks before combining runs; the exact
+cross-start stability is not yet verified. Neither bounded check establishes
+G1. No held-out evaluation ran. The endpoint remains paused.
+At the listed $0.80/hour, the
 two runner intervals estimate about $0.70 total before startup/minimums or other
 charges; the exact account bill is unavailable. No main merge or paper tags
 changed.

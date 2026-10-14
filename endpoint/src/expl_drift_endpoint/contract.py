@@ -39,10 +39,10 @@ class ModelRevision(ContractModel):
 
 
 class RuntimeIdentity(ContractModel):
-    """Observed files/software/device, with image identity only deployment-configured."""
+    """Observed software/device and loaded model state; image identity is configured only."""
 
     implementation_sha256: Fingerprint
-    checkpoint_artifact_sha256: Fingerprint
+    model_state_sha256: Fingerprint
     sdk_version: str
     torch_version: str
     transformers_version: str
@@ -83,7 +83,7 @@ class AttributionPlan(ContractModel):
 
 
 class ExtractionRequest(ContractModel):
-    schema_version: Literal["2"]
+    schema_version: Literal["3"]
     request_id: Identifier
     run_id: Identifier
     window_index: int = Field(ge=0)
@@ -217,7 +217,7 @@ class SampleScores(ContractModel):
 
 
 class ExtractionResponse(ContractModel):
-    schema_version: Literal["2"]
+    schema_version: Literal["3"]
     request_id: Identifier
     request_sha256: Fingerprint
     run_id: Identifier
@@ -236,7 +236,7 @@ class ExtractionResponse(ContractModel):
 
 
 class Readiness(ContractModel):
-    schema_version: Literal["2"] = "2"
+    schema_version: Literal["3"] = "3"
     status: Literal["not_ready", "ready"] = "not_ready"
     reason: str | None = "No model adapter has been configured."
     extraction_available: bool = False

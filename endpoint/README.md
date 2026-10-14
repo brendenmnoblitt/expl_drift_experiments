@@ -110,16 +110,18 @@ passes, or the 16384-evaluation cap fails. This is a numerical check, not a
 faithfulness or scientific qualification claim.
 
 The response fingerprints the entire canonical request and ordered batch.
-Runtime identity hashes mounted checkpoint artifacts, service source and loaded
-settings, and records SDK/Python/Torch/Transformers/device identities. Set
+Runtime identity fingerprints loaded model-state tensors (sorted names, dtype,
+shape and exact bytes), service source and settings, and records
+SDK/Python/Torch/Transformers/device identities. This avoids binding checkpoint
+identity to incidental files in the mutable `/repository` mount. Set
 `LAYA_ENDPOINT_IMAGE_DIGEST` in the service environment; it is explicitly
 `configured_not_attested`, not a cryptographically verified running image.
 The host independently recalculates probabilities, margins and completeness.
 Split requests retain each child's exact execution identity; concatenation does
 not claim that the parent batch was executed. Cache/resume rejects changed text,
-targets, precision, runtime, image, and batch context. Schema-1 candidate-logit
-and mixed-image pilot caches are preserved historical artifacts, never resumed
-as schema-2 margins.
+targets, precision, runtime, image, and batch context. The runtime identity
+field change is schema 3; schema-1 and schema-2 caches remain historical and
+are not resumed under the new contract.
 
 ## Current implementation status
 
@@ -173,11 +175,15 @@ root README; these historical results do not imply it.
   `../results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-13/`
   returned a third fingerprint,
   `a3f80ff3984e86b0d48879cbfed9c8bd4025d5f0c8e8729227a1d7f653d23b01`;
-  it issued zero extraction requests. Runtime identity hashes every
-  non-hidden file under `/repository` after Laya initialization, and the
-  cause of the variance is unresolved. Keep reports separate; no same-runtime
-  cross-task claim or G1 is established. No held-out evaluation ran. The
-  endpoint is paused.
+  The prior field hashed every non-hidden file under `/repository`, so its
+  value could change with mount contents unrelated to the loaded weights. The
+  historical records do not include per-file manifests; they cannot identify
+  which path differed. Runtime schema now fingerprints sorted loaded model
+  state tensors (names, dtype, shape and exact bytes) as `model_state_sha256`,
+  rather than the mutable mount tree. This is a runtime-identity correction,
+  not a qualification: deploy a new image and rerun G1 from the beginning.
+  Keep old reports separate; no same-runtime cross-task claim or G1 is
+  established. No held-out evaluation ran. The endpoint is paused.
 
 ### Remote pilot check on October 10 2026
 

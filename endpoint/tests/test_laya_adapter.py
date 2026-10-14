@@ -6,7 +6,11 @@ import numpy as np
 import pytest
 
 from expl_drift_endpoint.contract import ExtractionRequest
-from expl_drift_endpoint.laya_adapter import IncompatibleRevision, LayaAdapter
+from expl_drift_endpoint.laya_adapter import (
+    IncompatibleRevision,
+    LayaAdapter,
+    _hash_model_state,
+)
 
 
 def test_fixed_signed_margin_and_document_pool_share_forward_function(
@@ -68,3 +72,17 @@ def test_different_checkpoint_or_runtime_cannot_execute(
     adapter = LayaAdapter(fake_agent, "/fixture", runtime=runtime_identity)
     with pytest.raises(IncompatibleRevision):
         adapter.extract(ExtractionRequest.model_validate(payload))
+
+
+def test_loaded_model_state_fingerprint_is_content_stable_and_sensitive():
+    import torch
+    from torch import nn
+
+    first = nn.Linear(2, 3)
+    second = nn.Linear(2, 3)
+    second.load_state_dict(first.state_dict())
+    assert _hash_model_state(first) == _hash_model_state(second)
+
+    with torch.no_grad():
+        second.weight[0, 0] += 1
+    assert _hash_model_state(first) != _hash_model_state(second)

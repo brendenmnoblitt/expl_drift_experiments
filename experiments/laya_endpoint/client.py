@@ -127,8 +127,8 @@ def _finite(value: Any) -> bool:
 
 def validate_response(request: dict[str, Any], response: dict[str, Any]) -> None:
     """Independently reconstruct scores, fixed targets and completeness."""
-    if request.get("schema_version") != "2":
-        raise ValueError("schema 1 candidate-logit caches are historical pilot artifacts only")
+    if request.get("schema_version") != "3":
+        raise ValueError("only schema 3 model-state-fingerprinted extraction caches are accepted")
     if "execution_batches" in response:
         parts = response["execution_batches"]
         if not isinstance(parts, list):

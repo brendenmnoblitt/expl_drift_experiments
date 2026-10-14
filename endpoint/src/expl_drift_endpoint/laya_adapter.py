@@ -55,15 +55,33 @@ def _hash_files(root: Path, paths: list[Path]) -> str:
     return digest.hexdigest()
 
 
-def _runtime_identity(agent: Any, model_path: str) -> RuntimeIdentity:
+def _hash_model_state(model: Any) -> str:
+    """Hash loaded tensor values and metadata, independent of checkpoint mount files."""
     import torch
 
-    root = Path(model_path)
-    artifacts = [
-        path
-        for path in root.rglob("*")
-        if path.is_file() and not any(part.startswith(".") for part in path.relative_to(root).parts)
-    ]
+    digest = hashlib.sha256()
+    state = model.state_dict()
+    if not state:
+        raise ValueError("Loaded model has no state tensors")
+    for name, tensor in sorted(state.items()):
+        if not isinstance(tensor, torch.Tensor):
+            raise TypeError(f"Model state entry {name!r} is not a tensor")
+        encoded_name = name.encode()
+        metadata = json.dumps(
+            [str(tensor.dtype), list(tensor.shape)], separators=(",", ":")
+        ).encode()
+        digest.update(len(encoded_name).to_bytes(8, "big"))
+        digest.update(encoded_name)
+        digest.update(len(metadata).to_bytes(8, "big"))
+        digest.update(metadata)
+        value = tensor.detach().to(device="cpu").contiguous().view(torch.uint8).numpy()
+        digest.update(memoryview(value))
+    return digest.hexdigest()
+
+
+def _runtime_identity(agent: Any) -> RuntimeIdentity:
+    import torch
+
     source_root = Path(__file__).parent
     settings = {
         "cfg": agent.cfg,
@@ -79,7 +97,7 @@ def _runtime_identity(agent: Any, model_path: str) -> RuntimeIdentity:
     }
     return RuntimeIdentity(
         implementation_sha256=_hash_files(source_root, list(source_root.glob("*.py"))),
-        checkpoint_artifact_sha256=_hash_files(root, artifacts),
+        model_state_sha256=_hash_model_state(agent.model),
         sdk_version=importlib.metadata.version("laya"),
         torch_version=torch.__version__,
         transformers_version=importlib.metadata.version("transformers"),
@@ -127,7 +145,7 @@ class LayaAdapter:
         # TF32 would contradict the declared full-precision arithmetic path.
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.backends.cudnn.allow_tf32 = False
-        self.runtime = runtime if runtime is not None else _runtime_identity(agent, model_path)
+        self.runtime = runtime if runtime is not None else _runtime_identity(agent)
         self._inference_lock = threading.Lock()
 
     @classmethod
@@ -233,7 +251,7 @@ class LayaAdapter:
                     )
                 )
         return ExtractionResponse(
-            schema_version="2",
+            schema_version="3",
             request_id=request.request_id,
             request_sha256=request_fingerprint(request),
             run_id=request.run_id,
