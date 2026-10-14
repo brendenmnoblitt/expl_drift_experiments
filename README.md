@@ -140,12 +140,27 @@ change and is consistent with, but does not prove, the source of the three
 historical hashes. Schema 4 still includes mutable mount metadata in runtime
 identity; distinct schema-4 fingerprints remain non-combinable.
 
-Schema 5 is being implemented locally to separate semantic runtime identity
-(loaded model/tokenizer/config, implementation, settings, software, device, and
-configured image) from the diagnostic checkpoint-mount manifest returned by
-`/health`. It is not deployed or qualified. Schema-4 results cannot qualify
-schema 5; the endpoint remains paused, no held-out evaluation ran, and G1
-remains open. Full schema-4 evidence:
+Schema 5 separates semantic runtime identity (loaded model/tokenizer/config,
+implementation, settings, software, device, and configured image) from the
+diagnostic checkpoint-mount manifest returned by `/health`. Image
+`sha256:f145d63fbf21a81eb954da37cd504c3d85308f411bfdb8dc62d85d529ddfcbb4`
+was built from commit `3d0cb0861c884ae89ab6820d8fe05f570c3942b8` by [workflow
+38564544055](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38564544055)
+and deployed to the existing L4 x1 endpoint with scaling unchanged. Two
+health-only cold starts matched every semantic runtime field and the complete
+39-file mount manifest, including `hub_model_info.json` (4,859 bytes,
+SHA-256 `34830ef9c04d8080aa4245a359c601a3212c68c880e0b35c2902cb7785b6b804`).
+The service reports `scientifically_qualified: false`.
+
+Fresh signal qualification has not run. The first YouTube CLI attempt failed
+local preflight because `HF_TOKEN`/`HUGGINGFACE_HUB_TOKEN` was absent; no HTTP
+health or extraction request was made by that attempt (0 requests, 0 gradients).
+The endpoint was paused. The approved run allowed no retries after failure, so
+there will be no second attempt without renewed authorization. Schema-4 results
+do not qualify schema 5; G1 remains open, held-out evaluation remains sealed.
+Health evidence and the failed preflight are in
+`results/research-extension-data/remote-laya-qualification-v5/`. Full schema-4
+evidence:
 `results/research-extension-data/remote-laya-qualification-v4/attempt-summary.json`.
 No main merge or paper tags changed.
 
@@ -319,11 +334,14 @@ The active host runner is updated locally for endpoint schema 5: fixed
 spam-minus-ham margins, unrounded temperature-scaled probabilities, document
 representations, semantic runtime/batch fingerprints, and independently
 recalculable completeness. The full checkpoint-mount manifest is a health
-diagnostic, not a cache-key component. The schema-5 image is not yet published
-or deployed; the endpoint still runs schema 4. The data path uses the corrected
-inventory and one representative per duplicate/template group. Its legacy
-window-count profiles remain development-only, not the seven-role primary
-study.
+diagnostic, not a cache-key component. The schema-5 image is deployed on the
+existing endpoint; two health-only cold starts matched semantic identity and
+all 39 checkpoint files. The failed YouTube qualification stopped before any
+HTTP request because the CLI received no token environment variable. The
+endpoint is paused; no extraction or window study has run.
+The data path uses the corrected inventory and one representative per
+duplicate/template group. Legacy window-count profiles remain development-only,
+not the seven-role primary study.
 The development qualifier is endpoint-only; it does not load a local model.
 It requires exactly eight designated development examples for the selected
 corpus and preserves its frozen candidate order/reference. YouTube runs the

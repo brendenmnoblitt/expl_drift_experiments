@@ -135,14 +135,22 @@ fingerprints remain separate. The two G1 task runs shared one fingerprint;
 they are bounded development evidence only, not full G1 qualification.
 
 Schema 5 separates semantic runtime identity from the checkpoint-mount
-diagnostic. The implementation is local and unqualified; no schema-5 image is
-built or deployed. Schema-4 extraction results cannot qualify schema 5. The
-endpoint is paused. Health-only manifest evidence is at
-`../results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-14-schema4/attempt-summary.json`;
-G1 data and mount diff are at
-`../results/research-extension-data/remote-laya-qualification-v4/attempt-summary.json`.
-Schema-1 through schema-3 caches remain historical and are not resumed under
-this contract.
+diagnostic. Image
+`sha256:f145d63fbf21a81eb954da37cd504c3d85308f411bfdb8dc62d85d529ddfcbb4`
+was built from commit `3d0cb0861c884ae89ab6820d8fe05f570c3942b8` in workflow
+`38564544055` and deployed to the existing L4 x1 endpoint with scaling
+unchanged. Two health-only cold starts matched all semantic runtime fields and
+all 39 checkpoint files. `scientifically_qualified` remains false.
+
+The fresh YouTube qualification attempt failed local CLI preflight because no
+`HF_TOKEN`/`HUGGINGFACE_HUB_TOKEN` was passed; no health or extraction request
+was made by the qualifier. The endpoint was paused, with 0 extraction requests
+and 0 gradient evaluations. The approved run forbids retries after failure;
+renewed authorization is required before another attempt. Schema-4 extraction
+results cannot qualify schema 5. Evidence is in
+`../results/research-extension-data/remote-laya-qualification-v5/`. Schema-1
+through schema-3 caches remain historical and are not resumed under this
+contract.
 
 ## Current implementation status
 
