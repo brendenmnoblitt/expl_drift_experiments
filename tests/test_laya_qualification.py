@@ -38,7 +38,7 @@ class FakeClient:
 
     def health(self):
         return {
-            "schema_version": "3",
+            "schema_version": "4",
             "model": MODEL,
             "runtime": {"configured_image_digest": IMAGE},
             "capabilities": [

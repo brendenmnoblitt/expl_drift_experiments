@@ -11,7 +11,11 @@ from expl_drift_endpoint.contract import RuntimeIdentity
 def runtime_identity():
     return RuntimeIdentity(
         implementation_sha256="1" * 64,
+        checkpoint_artifact_sha256="a" * 64,
+        checkpoint_files=[{"path": "model.safetensors", "size_bytes": 1, "sha256": "b" * 64}],
         model_state_sha256="2" * 64,
+        model_config_sha256="c" * 64,
+        tokenizer_sha256="d" * 64,
         sdk_version="0.3.29",
         torch_version="fixture",
         transformers_version="fixture",
@@ -31,7 +35,7 @@ def request_payload(runtime_identity):
         "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148",
     }
     return {
-        "schema_version": "3",
+        "schema_version": "4",
         "request_id": "request-1",
         "run_id": "run-1",
         "window_index": 0,

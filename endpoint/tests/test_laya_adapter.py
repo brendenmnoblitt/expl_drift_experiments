@@ -9,7 +9,9 @@ from expl_drift_endpoint.contract import ExtractionRequest
 from expl_drift_endpoint.laya_adapter import (
     IncompatibleRevision,
     LayaAdapter,
+    _checkpoint_file_manifest,
     _hash_model_state,
+    _hash_tokenizer,
 )
 
 
@@ -86,3 +88,41 @@ def test_loaded_model_state_fingerprint_is_content_stable_and_sensitive():
     with torch.no_grad():
         second.weight[0, 0] += 1
     assert _hash_model_state(first) != _hash_model_state(second)
+
+
+def test_checkpoint_manifest_identifies_the_changed_artifact(tmp_path):
+    tokenizer_dir = tmp_path / "tokenizer"
+    tokenizer_dir.mkdir()
+    config = tokenizer_dir / "tokenizer_config.json"
+    config.write_text('{"tokenizer_class":"A"}', encoding="utf-8")
+    (tmp_path / "model.safetensors").write_bytes(b"weights")
+
+    before_digest, before_files = _checkpoint_file_manifest(tmp_path)
+    config.write_text('{"tokenizer_class":"B"}', encoding="utf-8")
+    after_digest, after_files = _checkpoint_file_manifest(tmp_path)
+
+    assert before_digest != after_digest
+    changed_paths = [
+        before.path
+        for before, after in zip(before_files, after_files, strict=True)
+        if before.sha256 != after.sha256
+    ]
+    assert changed_paths == ["tokenizer/tokenizer_config.json"]
+
+
+def test_tokenizer_fingerprint_includes_backend_vocabulary():
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import Whitespace
+    from transformers import PreTrainedTokenizerFast
+
+    def make_tokenizer():
+        backend = Tokenizer(WordLevel({"[UNK]": 0, "hello": 1}, unk_token="[UNK]"))
+        backend.pre_tokenizer = Whitespace()
+        return PreTrainedTokenizerFast(tokenizer_object=backend, unk_token="[UNK]")
+
+    first = make_tokenizer()
+    second = make_tokenizer()
+    assert _hash_tokenizer(first) == _hash_tokenizer(second)
+    second.add_tokens(["new_token"])
+    assert _hash_tokenizer(first) != _hash_tokenizer(second)

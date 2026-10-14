@@ -9,11 +9,13 @@ import os
 import platform
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from expl_drift_endpoint.contract import (
     CandidateScore,
+    CheckpointFileIdentity,
     ExtractionRequest,
     ExtractionResponse,
     ModelRevision,
@@ -55,8 +57,44 @@ def _hash_files(root: Path, paths: list[Path]) -> str:
     return digest.hexdigest()
 
 
+def _hash_json(value: Any) -> str:
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _checkpoint_file_manifest(root: Path) -> tuple[str, list[CheckpointFileIdentity]]:
+    """Return the legacy tree digest and per-file hashes for startup diagnostics."""
+    digest = hashlib.sha256()
+    files: list[CheckpointFileIdentity] = []
+    paths = [
+        path
+        for path in root.rglob("*")
+        if path.is_file() and not any(part.startswith(".") for part in path.relative_to(root).parts)
+    ]
+    for path in sorted(paths):
+        relative = path.relative_to(root).as_posix()
+        name = relative.encode()
+        size = path.stat().st_size
+        digest.update(len(name).to_bytes(8, "big"))
+        digest.update(name)
+        digest.update(size.to_bytes(8, "big"))
+        file_digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+                file_digest.update(chunk)
+        files.append(
+            CheckpointFileIdentity(path=relative, size_bytes=size, sha256=file_digest.hexdigest())
+        )
+    if not files:
+        raise ValueError(f"No runtime artifact files found in {root}")
+    return digest.hexdigest(), files
+
+
 def _hash_model_state(model: Any) -> str:
-    """Hash loaded tensor values and metadata, independent of checkpoint mount files."""
+    """Hash loaded tensor values and metadata."""
     import torch
 
     digest = hashlib.sha256()
@@ -79,10 +117,44 @@ def _hash_model_state(model: Any) -> str:
     return digest.hexdigest()
 
 
-def _runtime_identity(agent: Any) -> RuntimeIdentity:
+def _tokenizer_value(value: Any) -> Any:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _tokenizer_value(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_tokenizer_value(item) for item in value]
+    if hasattr(value, "content"):
+        return {
+            name: getattr(value, name)
+            for name in ("content", "single_word", "lstrip", "rstrip", "normalized", "special")
+            if hasattr(value, name)
+        }
+    raise TypeError(f"Unsupported tokenizer identity value: {type(value).__qualname__}")
+
+
+def _hash_tokenizer(tokenizer: Any) -> str:
+    backend = getattr(tokenizer, "backend_tokenizer", None)
+    if backend is None or not callable(getattr(backend, "to_str", None)):
+        raise TypeError("Laya tokenizer must expose its serialized backend tokenizer")
+    return _hash_json(
+        {
+            "class": f"{type(tokenizer).__module__}.{type(tokenizer).__qualname__}",
+            "backend": backend.to_str(),
+            "special_tokens_map": _tokenizer_value(tokenizer.special_tokens_map),
+            "model_input_names": list(tokenizer.model_input_names),
+            "padding_side": tokenizer.padding_side,
+            "truncation_side": tokenizer.truncation_side,
+            "model_max_length": tokenizer.model_max_length,
+        }
+    )
+
+
+def _runtime_identity(agent: Any, model_path: str) -> RuntimeIdentity:
     import torch
 
     source_root = Path(__file__).parent
+    checkpoint_artifact_sha256, checkpoint_files = _checkpoint_file_manifest(Path(model_path))
     settings = {
         "cfg": agent.cfg,
         "temperature": agent.temperature,
@@ -97,7 +169,16 @@ def _runtime_identity(agent: Any) -> RuntimeIdentity:
     }
     return RuntimeIdentity(
         implementation_sha256=_hash_files(source_root, list(source_root.glob("*.py"))),
+        checkpoint_artifact_sha256=checkpoint_artifact_sha256,
+        checkpoint_files=checkpoint_files,
         model_state_sha256=_hash_model_state(agent.model),
+        model_config_sha256=_hash_json(
+            {
+                "laya_config": agent.cfg,
+                "encoder_config": agent.model.encoder.config.to_dict(),
+            }
+        ),
+        tokenizer_sha256=_hash_tokenizer(agent.tok),
         sdk_version=importlib.metadata.version("laya"),
         torch_version=torch.__version__,
         transformers_version=importlib.metadata.version("transformers"),
@@ -105,9 +186,7 @@ def _runtime_identity(agent: Any) -> RuntimeIdentity:
         device=str(agent.device),
         cuda_version=torch.version.cuda,
         gpu_name=torch.cuda.get_device_name(agent.device) if agent.device.type == "cuda" else None,
-        settings_sha256=hashlib.sha256(
-            json.dumps(settings, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest(),
+        settings_sha256=_hash_json(settings),
         configured_image_digest=os.environ["LAYA_ENDPOINT_IMAGE_DIGEST"],
     )
 
@@ -145,7 +224,7 @@ class LayaAdapter:
         # TF32 would contradict the declared full-precision arithmetic path.
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.backends.cudnn.allow_tf32 = False
-        self.runtime = runtime if runtime is not None else _runtime_identity(agent)
+        self.runtime = runtime if runtime is not None else _runtime_identity(agent, model_path)
         self._inference_lock = threading.Lock()
 
     @classmethod
@@ -251,7 +330,7 @@ class LayaAdapter:
                     )
                 )
         return ExtractionResponse(
-            schema_version="3",
+            schema_version="4",
             request_id=request.request_id,
             request_sha256=request_fingerprint(request),
             run_id=request.run_id,

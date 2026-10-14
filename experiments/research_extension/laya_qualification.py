@@ -299,7 +299,7 @@ def qualify_laya(
     client = client_factory(endpoint_url, token, timeout=min(timeout_seconds, MAX_TIMEOUT_SECONDS))
     try:
         health = client.health()
-        if health.get("schema_version") != "3" or health.get("model") != MODEL:
+        if health.get("schema_version") != "4" or health.get("model") != MODEL:
             raise RuntimeError(
                 "endpoint health reports a different schema or pinned model revision"
             )
@@ -363,7 +363,7 @@ def qualify_laya(
                         ]
                         corpus_sha = sha256_json(endpoint_samples)
                         request = {
-                            "schema_version": "3",
+                            "schema_version": "4",
                             "request_id": (
                                 f"laya-qualification-{task_id}-{target_id}-{batch_size}-r{repeat}-"
                                 f"c{chunk_index}-{corpus_sha[:12]}"

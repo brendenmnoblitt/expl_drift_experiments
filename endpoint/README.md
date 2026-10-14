@@ -78,7 +78,8 @@ responses. It does not exercise Laya or qualify the model-runtime image.
 
 ## Input contract
 
-Schema version `2` accepts one instruction and ordered candidate set per request.
+The pending schema-version-4 contract accepts one instruction and ordered
+candidate set per request.
 Every sample is collated and executed independently in a fixed singleton context,
 regardless of its transport batch size. It pins model/tokenizer snapshots, the
 observed `/health` runtime, `precision="float32_no_autocast"`,
@@ -110,18 +111,19 @@ passes, or the 16384-evaluation cap fails. This is a numerical check, not a
 faithfulness or scientific qualification claim.
 
 The response fingerprints the entire canonical request and ordered batch.
-Runtime identity fingerprints loaded model-state tensors (sorted names, dtype,
-shape and exact bytes), service source and settings, and records
-SDK/Python/Torch/Transformers/device identities. This avoids binding checkpoint
-identity to incidental files in the mutable `/repository` mount. Set
-`LAYA_ENDPOINT_IMAGE_DIGEST` in the service environment; it is explicitly
-`configured_not_attested`, not a cryptographically verified running image.
-The host independently recalculates probabilities, margins and completeness.
-Split requests retain each child's exact execution identity; concatenation does
-not claim that the parent batch was executed. Cache/resume rejects changed text,
-targets, precision, runtime, image, and batch context. The runtime identity
-field change is schema 3; schema-1 and schema-2 caches remain historical and
-are not resumed under the new contract.
+Runtime identity includes the full non-hidden checkpoint mount's file manifest
+(path, size and SHA-256), loaded model-state tensors, tokenizer backend/settings,
+encoder config, service source and runtime settings, plus
+SDK/Python/Torch/Transformers/device identities. The model/tokenizer revision is
+also pinned in the request. Set `LAYA_ENDPOINT_IMAGE_DIGEST` in the service
+environment; it is `configured_not_attested`, not a cryptographically verified
+running image. The host independently recalculates probabilities, margins and
+completeness. Split requests retain each child's exact execution identity;
+concatenation does not claim that the parent batch was executed. Cache/resume
+rejects changed text, targets, precision, runtime, image, and batch context.
+Schema 4 captures the expanded runtime identity and is not yet deployed.
+Schema-1 through schema-3 caches remain historical and are not resumed under
+this contract.
 
 ## Current implementation status
 
@@ -175,20 +177,18 @@ root README; these historical results do not imply it.
   `../results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-13/`
   returned a third fingerprint,
   `a3f80ff3984e86b0d48879cbfed9c8bd4025d5f0c8e8729227a1d7f653d23b01`;
-  The prior field hashed every non-hidden file under `/repository`, so its
-  value could change with mount contents unrelated to the loaded weights. The
-  historical records do not include per-file manifests; they cannot identify
-  which path differed. Runtime schema now fingerprints sorted loaded model
-  state tensors (names, dtype, shape and exact bytes) as `model_state_sha256`,
-  This corrects runtime identity only; it does not qualify any signal.
-  Image `sha256:67c8a8e029323c3dad1fbbf9bdfb444b61ffe9c313685ce1230614dff96cc363`
-  is now deployed. Two paused/resumed health-only starts returned identical
-  schema-3 runtime identities and loaded model-state fingerprints; each made
-  zero extraction requests. Evidence is in
+  The old field hashed every non-hidden file under `/repository`. Historical
+  reports have no per-file manifests, so the three differing legacy fingerprints
+  cannot be attributed to a specific path. Schema 3 image
+  `sha256:67c8a8e029323c3dad1fbbf9bdfb444b61ffe9c313685ce1230614dff96cc363`
+  fingerprints loaded model weights; two paused/resumed health-only starts
+  matched exactly, with zero extraction requests. It did not include tokenizer
+  or encoder-config identity. Evidence:
   `../results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-14-schema3/`.
-  Identity stability is verified for these starts, not G1 qualification.
-  Keep old reports separate; no cross-task signal combination or held-out
-  evaluation occurred. The endpoint is paused.
+  The local schema-4 implementation adds per-file mount hashes, loaded tokenizer
+  and encoder-config fingerprints; it is not deployed. This is still not G1
+  signal qualification. Keep old reports separate; do not combine their signals
+  or use held-out results. The endpoint is paused.
 
 ### Remote pilot check on October 10 2026
 

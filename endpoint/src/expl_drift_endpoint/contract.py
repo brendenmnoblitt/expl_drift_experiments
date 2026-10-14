@@ -38,11 +38,21 @@ class ModelRevision(ContractModel):
     revision: Commit
 
 
+class CheckpointFileIdentity(ContractModel):
+    path: str
+    size_bytes: int = Field(ge=0)
+    sha256: Fingerprint
+
+
 class RuntimeIdentity(ContractModel):
-    """Observed software/device and loaded model state; image identity is configured only."""
+    """Observed software, checkpoint, tokenizer, model config, and loaded state."""
 
     implementation_sha256: Fingerprint
+    checkpoint_artifact_sha256: Fingerprint
+    checkpoint_files: list[CheckpointFileIdentity]
     model_state_sha256: Fingerprint
+    model_config_sha256: Fingerprint
+    tokenizer_sha256: Fingerprint
     sdk_version: str
     torch_version: str
     transformers_version: str
@@ -83,7 +93,7 @@ class AttributionPlan(ContractModel):
 
 
 class ExtractionRequest(ContractModel):
-    schema_version: Literal["3"]
+    schema_version: Literal["4"]
     request_id: Identifier
     run_id: Identifier
     window_index: int = Field(ge=0)
@@ -217,7 +227,7 @@ class SampleScores(ContractModel):
 
 
 class ExtractionResponse(ContractModel):
-    schema_version: Literal["3"]
+    schema_version: Literal["4"]
     request_id: Identifier
     request_sha256: Fingerprint
     run_id: Identifier
@@ -236,7 +246,7 @@ class ExtractionResponse(ContractModel):
 
 
 class Readiness(ContractModel):
-    schema_version: Literal["3"] = "3"
+    schema_version: Literal["4"] = "4"
     status: Literal["not_ready", "ready"] = "not_ready"
     reason: str | None = "No model adapter has been configured."
     extraction_available: bool = False

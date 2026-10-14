@@ -106,17 +106,16 @@ health-only cold start returned a third fingerprint
 (`a3f80ff3984e86b0d48879cbfed9c8bd4025d5f0c8e8729227a1d7f653d23b01`; prior
 run values: `35b599d63dfa3816f29a8c1280499560e4950b5a5ebf6b75d1437a2769e1abd1`
 and `f81510fe53d225e1553f302b08fc724752b1c535cc6c0325320dd33dcb7f3c1a`).
-No extraction ran during that check; the endpoint was paused. The old runtime
-fingerprint covered all non-hidden `/repository` files; per-file hashes were
-not saved, so the exact differing path cannot be identified. Schema 3 now
-fingerprints loaded model-state tensors. Image
-`sha256:67c8a8e029323c3dad1fbbf9bdfb444b61ffe9c313685ce1230614dff96cc363`
-was deployed. Two separate paused/resumed health-only starts returned matching
-runtime identities and model-state fingerprints; each made zero extraction
-requests. Evidence:
+No extraction ran during the health-only checks. The old runtime fingerprint
+covered all non-hidden `/repository` files, but the historical reports saved
+no per-file manifests; the specific differing paths remain unknown. Schema 3
+fingerprinted loaded model-state tensors and matched on two cold starts, but
+omitted tokenizer and encoder-config identity. A local schema-4 change now adds
+the legacy tree hash, per-file hashes, loaded weights, tokenizer settings and
+encoder config. It is not deployed. The endpoint remains paused. Evidence for
+the schema-3 checks:
 `results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-14-schema3/attempt-summary.json`.
-The endpoint is paused. This verifies identity stability for two starts only;
-G1 remains unqualified, and old task-run signals remain separate. No held-out
+G1 remains unqualified; old task-run signals remain separate. No held-out
 evaluation ran.
 The two earlier runner intervals estimate about $0.70 at the listed $0.80/hour,
 before startup/minimums. Billing for this image publication and two health-only

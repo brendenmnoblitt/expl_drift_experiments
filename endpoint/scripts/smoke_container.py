@@ -40,7 +40,7 @@ def main() -> None:
     # Synthetic revisions exercise the contract without loading a model.
     revision = {"repository": "fixture/model", "revision": "a" * 40}
     payload = {
-        "schema_version": "3",
+        "schema_version": "4",
         "request_id": "container-smoke",
         "run_id": "ci-smoke",
         "window_index": 0,
@@ -64,12 +64,22 @@ def main() -> None:
         "pooling": "document_mean_last_hidden_state",
         "runtime": {
             "implementation_sha256": "c" * 64,
+            "checkpoint_artifact_sha256": "a" * 64,
+            "checkpoint_files": [
+                {"path": "model.safetensors", "size_bytes": 1, "sha256": "b" * 64}
+            ],
             "model_state_sha256": "d" * 64,
-            "sdk_version": "fixture", "torch_version": "fixture",
-            "transformers_version": "fixture", "python_version": "fixture",
-            "device": "cpu", "cuda_version": None, "gpu_name": None,
-            "settings_sha256": "e" * 64,
-            "configured_image_digest": "sha256:" + "f" * 64,
+            "model_config_sha256": "e" * 64,
+            "tokenizer_sha256": "f" * 64,
+            "sdk_version": "fixture",
+            "torch_version": "fixture",
+            "transformers_version": "fixture",
+            "python_version": "fixture",
+            "device": "cpu",
+            "cuda_version": None,
+            "gpu_name": None,
+            "settings_sha256": "1" * 64,
+            "configured_image_digest": "sha256:" + "2" * 64,
         },
     }
     status, body = request("/extract", payload)
