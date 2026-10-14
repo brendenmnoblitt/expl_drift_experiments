@@ -50,6 +50,7 @@ def create_app(adapter_factory: Callable[[], Any] | None = None) -> FastAPI:
             capabilities=adapter.capabilities,
             model=adapter.model_revision,
             runtime=adapter.runtime,
+            checkpoint_mount=adapter.checkpoint_mount,
         )
 
     @application.post("/extract", response_model=ExtractionResponse)

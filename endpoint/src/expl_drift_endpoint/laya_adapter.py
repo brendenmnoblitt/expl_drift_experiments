@@ -16,6 +16,7 @@ from typing import Any
 from expl_drift_endpoint.contract import (
     CandidateScore,
     CheckpointFileIdentity,
+    CheckpointMountManifest,
     ExtractionRequest,
     ExtractionResponse,
     ModelRevision,
@@ -150,11 +151,10 @@ def _hash_tokenizer(tokenizer: Any) -> str:
     )
 
 
-def _runtime_identity(agent: Any, model_path: str) -> RuntimeIdentity:
+def _runtime_identity(agent: Any) -> RuntimeIdentity:
     import torch
 
     source_root = Path(__file__).parent
-    checkpoint_artifact_sha256, checkpoint_files = _checkpoint_file_manifest(Path(model_path))
     settings = {
         "cfg": agent.cfg,
         "temperature": agent.temperature,
@@ -169,8 +169,6 @@ def _runtime_identity(agent: Any, model_path: str) -> RuntimeIdentity:
     }
     return RuntimeIdentity(
         implementation_sha256=_hash_files(source_root, list(source_root.glob("*.py"))),
-        checkpoint_artifact_sha256=checkpoint_artifact_sha256,
-        checkpoint_files=checkpoint_files,
         model_state_sha256=_hash_model_state(agent.model),
         model_config_sha256=_hash_json(
             {
@@ -209,6 +207,7 @@ class LayaAdapter:
         revision: str = MODEL_REVISION,
         *,
         runtime: RuntimeIdentity | None = None,
+        checkpoint_mount: CheckpointMountManifest | None = None,
     ):
         import torch
 
@@ -224,7 +223,14 @@ class LayaAdapter:
         # TF32 would contradict the declared full-precision arithmetic path.
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.backends.cudnn.allow_tf32 = False
-        self.runtime = runtime if runtime is not None else _runtime_identity(agent, model_path)
+        self.runtime = runtime if runtime is not None else _runtime_identity(agent)
+        if checkpoint_mount is None:
+            artifact_sha, files = _checkpoint_file_manifest(Path(model_path))
+            checkpoint_mount = CheckpointMountManifest(
+                checkpoint_artifact_sha256=artifact_sha,
+                checkpoint_files=files,
+            )
+        self.checkpoint_mount = checkpoint_mount
         self._inference_lock = threading.Lock()
 
     @classmethod
@@ -330,7 +336,7 @@ class LayaAdapter:
                     )
                 )
         return ExtractionResponse(
-            schema_version="4",
+            schema_version="5",
             request_id=request.request_id,
             request_sha256=request_fingerprint(request),
             run_id=request.run_id,

@@ -55,14 +55,20 @@ def test_invalid_task_and_identity_are_rejected(client, request_payload, mutate)
     assert client.post("/extract", json=request_payload).status_code == 422
 
 
-def test_http_extraction_has_signed_margin_and_immutable_runtime_errors(
-    request_payload, runtime_identity, fake_agent
+def test_http_extraction_keeps_mount_diagnostics_out_of_semantic_identity(
+    request_payload, runtime_identity, checkpoint_mount, fake_agent
 ):
-    adapter = LayaAdapter(fake_agent, "/fixture", runtime=runtime_identity)
+    adapter = LayaAdapter(
+        fake_agent, "/fixture", runtime=runtime_identity, checkpoint_mount=checkpoint_mount
+    )
     with TestClient(create_app(adapter_factory=lambda: adapter)) as client:
+        health = client.get("/health").json()
+        assert health["checkpoint_mount"] == checkpoint_mount.model_dump()
+        assert "checkpoint_artifact_sha256" not in health["runtime"]
         response = client.post("/extract", json=request_payload)
         assert response.status_code == 200
-        assert [sample["target_value"] for sample in response.json()["samples"]] == [8.0, -16.0]
+        assert response.json()["runtime"] == runtime_identity.model_dump()
+        assert "checkpoint_files" not in response.json()["runtime"]
         changed = copy.deepcopy(request_payload)
         changed["runtime"]["configured_image_digest"] = "sha256:" + "c" * 64
         assert client.post("/extract", json=changed).status_code == 409

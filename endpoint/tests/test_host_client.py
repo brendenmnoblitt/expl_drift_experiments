@@ -62,6 +62,7 @@ def test_partial_cache_replays_exact_children_and_keeps_actual_batch_context(
     tmp_path,
     request_payload,
     runtime_identity,
+    checkpoint_mount,
     fake_agent,
 ):
     request = copy.deepcopy(request_payload)
@@ -70,7 +71,9 @@ def test_partial_cache_replays_exact_children_and_keeps_actual_batch_context(
     ]
     request["corpus_sha256"] = client.sha256_json(request["samples"])
     children = client.split_request(request)
-    adapter = LayaAdapter(fake_agent, "/fixture", runtime=runtime_identity)
+    adapter = LayaAdapter(
+        fake_agent, "/fixture", runtime=runtime_identity, checkpoint_mount=checkpoint_mount
+    )
     records = [
         {
             "request": child,

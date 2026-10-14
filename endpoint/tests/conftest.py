@@ -4,15 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from expl_drift_endpoint.contract import RuntimeIdentity
+from expl_drift_endpoint.contract import CheckpointMountManifest, RuntimeIdentity
 
 
 @pytest.fixture
 def runtime_identity():
     return RuntimeIdentity(
         implementation_sha256="1" * 64,
-        checkpoint_artifact_sha256="a" * 64,
-        checkpoint_files=[{"path": "model.safetensors", "size_bytes": 1, "sha256": "b" * 64}],
         model_state_sha256="2" * 64,
         model_config_sha256="c" * 64,
         tokenizer_sha256="d" * 64,
@@ -29,13 +27,21 @@ def runtime_identity():
 
 
 @pytest.fixture
+def checkpoint_mount():
+    return CheckpointMountManifest(
+        checkpoint_artifact_sha256="a" * 64,
+        checkpoint_files=[{"path": "model.safetensors", "size_bytes": 1, "sha256": "b" * 64}],
+    )
+
+
+@pytest.fixture
 def request_payload(runtime_identity):
     revision = {
         "repository": "convaiinnovations/laya",
         "revision": "7b928d828b7b0e022f929d9bd2e44165aa270148",
     }
     return {
-        "schema_version": "4",
+        "schema_version": "5",
         "request_id": "request-1",
         "run_id": "run-1",
         "window_index": 0,
@@ -177,11 +183,13 @@ def fake_agent(monkeypatch):
 
 
 @pytest.fixture
-def response_payload(request_payload, runtime_identity, fake_agent):
+def response_payload(request_payload, runtime_identity, checkpoint_mount, fake_agent):
     from expl_drift_endpoint.contract import ExtractionRequest
     from expl_drift_endpoint.laya_adapter import LayaAdapter
 
-    adapter = LayaAdapter(fake_agent, "/fixture", runtime=runtime_identity)
+    adapter = LayaAdapter(
+        fake_agent, "/fixture", runtime=runtime_identity, checkpoint_mount=checkpoint_mount
+    )
     return adapter.extract(ExtractionRequest.model_validate(request_payload)).model_dump(
         mode="json"
     )

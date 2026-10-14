@@ -18,9 +18,12 @@ from expl_drift_endpoint.laya_adapter import (
 def test_fixed_signed_margin_and_document_pool_share_forward_function(
     request_payload,
     runtime_identity,
+    checkpoint_mount,
     fake_agent,
 ):
-    adapter = LayaAdapter(fake_agent, "/fixture", runtime=runtime_identity)
+    adapter = LayaAdapter(
+        fake_agent, "/fixture", runtime=runtime_identity, checkpoint_mount=checkpoint_mount
+    )
     response = adapter.extract(ExtractionRequest.model_validate(request_payload))
     positive, negative = response.samples
     assert positive.target_value == pytest.approx(8.0)
@@ -48,9 +51,11 @@ def test_fixed_signed_margin_and_document_pool_share_forward_function(
 
 
 def test_sample_outputs_are_invariant_to_request_batch_grouping(
-    request_payload, runtime_identity, fake_agent
+    request_payload, runtime_identity, checkpoint_mount, fake_agent
 ):
-    adapter = LayaAdapter(fake_agent, "/fixture", runtime=runtime_identity)
+    adapter = LayaAdapter(
+        fake_agent, "/fixture", runtime=runtime_identity, checkpoint_mount=checkpoint_mount
+    )
     grouped = adapter.extract(ExtractionRequest.model_validate(request_payload))
 
     for index, grouped_sample in enumerate(grouped.samples):
@@ -64,14 +69,16 @@ def test_sample_outputs_are_invariant_to_request_batch_grouping(
 
 @pytest.mark.parametrize("field", ["model", "runtime"])
 def test_different_checkpoint_or_runtime_cannot_execute(
-    request_payload, runtime_identity, fake_agent, field
+    request_payload, runtime_identity, checkpoint_mount, fake_agent, field
 ):
     payload = copy.deepcopy(request_payload)
     if field == "model":
         payload[field]["revision"] = "c" * 40
     else:
         payload[field]["implementation_sha256"] = "c" * 64
-    adapter = LayaAdapter(fake_agent, "/fixture", runtime=runtime_identity)
+    adapter = LayaAdapter(
+        fake_agent, "/fixture", runtime=runtime_identity, checkpoint_mount=checkpoint_mount
+    )
     with pytest.raises(IncompatibleRevision):
         adapter.extract(ExtractionRequest.model_validate(payload))
 

@@ -181,7 +181,7 @@ def _request_for_window(
     corpus_fingerprint = sha256_json(endpoint_samples)
     chunk_tag = f"-b{chunk_index}" if chunk_count > 1 else ""
     return {
-        "schema_version": "4",
+        "schema_version": "5",
         "request_id": f"{run_id}-w{window_index}{chunk_tag}-{corpus_fingerprint[:12]}",
         "run_id": run_id,
         "window_index": window_index,
@@ -248,7 +248,7 @@ def run(output_dir: Path, profile: str = "pilot") -> dict[str, Any]:
     experiment_revision = _git_revision(root)
     client = EndpointClient(endpoint_url, token)
     health = client.health()
-    if health.get("schema_version") != "4" or health.get("model") != MODEL:
+    if health.get("schema_version") != "5" or health.get("model") != MODEL:
         raise RuntimeError("endpoint health reports a different schema or model revision")
     runtime = health.get("runtime")
     if not isinstance(runtime, dict) or runtime.get("configured_image_digest") != image_digest:

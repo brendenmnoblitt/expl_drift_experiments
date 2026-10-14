@@ -44,12 +44,17 @@ class CheckpointFileIdentity(ContractModel):
     sha256: Fingerprint
 
 
-class RuntimeIdentity(ContractModel):
-    """Observed software, checkpoint, tokenizer, model config, and loaded state."""
+class CheckpointMountManifest(ContractModel):
+    """Diagnostic manifest for the endpoint mount; not part of inference identity."""
 
-    implementation_sha256: Fingerprint
     checkpoint_artifact_sha256: Fingerprint
     checkpoint_files: list[CheckpointFileIdentity]
+
+
+class RuntimeIdentity(ContractModel):
+    """Semantic identity of the loaded inference implementation and inputs."""
+
+    implementation_sha256: Fingerprint
     model_state_sha256: Fingerprint
     model_config_sha256: Fingerprint
     tokenizer_sha256: Fingerprint
@@ -93,7 +98,7 @@ class AttributionPlan(ContractModel):
 
 
 class ExtractionRequest(ContractModel):
-    schema_version: Literal["4"]
+    schema_version: Literal["5"]
     request_id: Identifier
     run_id: Identifier
     window_index: int = Field(ge=0)
@@ -227,7 +232,7 @@ class SampleScores(ContractModel):
 
 
 class ExtractionResponse(ContractModel):
-    schema_version: Literal["4"]
+    schema_version: Literal["5"]
     request_id: Identifier
     request_sha256: Fingerprint
     run_id: Identifier
@@ -246,7 +251,7 @@ class ExtractionResponse(ContractModel):
 
 
 class Readiness(ContractModel):
-    schema_version: Literal["4"] = "4"
+    schema_version: Literal["5"] = "5"
     status: Literal["not_ready", "ready"] = "not_ready"
     reason: str | None = "No model adapter has been configured."
     extraction_available: bool = False
@@ -254,3 +259,4 @@ class Readiness(ContractModel):
     scientifically_qualified: Literal[False] = False
     model: ModelRevision | None = None
     runtime: RuntimeIdentity | None = None
+    checkpoint_mount: CheckpointMountManifest | None = None

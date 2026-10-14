@@ -111,21 +111,36 @@ passes, or the 16384-evaluation cap fails. This is a numerical check, not a
 faithfulness or scientific qualification claim.
 
 The response fingerprints the entire canonical request and ordered batch.
-Runtime identity includes the full non-hidden checkpoint mount's file manifest
-(path, size and SHA-256), loaded model-state tensors, tokenizer backend/settings,
-encoder config, service source and runtime settings, plus
-SDK/Python/Torch/Transformers/device identities. The model/tokenizer revision is
-also pinned in the request. Set `LAYA_ENDPOINT_IMAGE_DIGEST` in the service
-environment; it is `configured_not_attested`, not a cryptographically verified
-running image. The host independently recalculates probabilities, margins and
-completeness. Split requests retain each child's exact execution identity;
+The semantic runtime identity records loaded model-state tensors, tokenizer
+backend/settings, encoder config, service source and runtime settings, plus
+SDK/Python/Torch/Transformers/device identities and the configured image. The
+full checkpoint-mount hash and per-file manifest are separate diagnostics in
+`/health.checkpoint_mount`; they are not request identity or cache-key fields.
+The model/tokenizer revision is also pinned in the request. Set
+`LAYA_ENDPOINT_IMAGE_DIGEST` in the service environment; it is
+`configured_not_attested`, not a cryptographically verified running image. The
+host independently recalculates probabilities, margins and completeness.
+Split requests retain each child's exact semantic execution identity;
 concatenation does not claim that the parent batch was executed. Cache/resume
-rejects changed text, targets, precision, runtime, image, and batch context.
-Schema 4 is deployed on the existing endpoint. Two separate health-only
-pause/resume cold starts matched the per-file mount manifest and expanded
-runtime identity; they do not resolve the historical file drift or qualify
-signals. The endpoint is paused. Evidence is recorded at
-`../results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-14-schema4/attempt-summary.json`.
+rejects changed text, targets, precision, semantic runtime, image, and batch
+context.
+
+Schema 4 is deployed on the existing endpoint. Two health-only pause/resume
+cold starts matched, but the subsequent G1 extraction start differed only in
+`hub_model_info.json` (4,840 bytes); the other 38 mount files and loaded model,
+tokenizer, config, implementation, and settings hashes matched. Hugging Face
+does not contain that file at the pinned revision. Schema 4 includes the
+mutable full mount hash in request runtime identity, so distinct schema-4
+fingerprints remain separate. The two G1 task runs shared one fingerprint;
+they are bounded development evidence only, not full G1 qualification.
+
+Schema 5 separates semantic runtime identity from the checkpoint-mount
+diagnostic. The implementation is local and unqualified; no schema-5 image is
+built or deployed. Schema-4 extraction results cannot qualify schema 5. The
+endpoint is paused. Health-only manifest evidence is at
+`../results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-14-schema4/attempt-summary.json`;
+G1 data and mount diff are at
+`../results/research-extension-data/remote-laya-qualification-v4/attempt-summary.json`.
 Schema-1 through schema-3 caches remain historical and are not resumed under
 this contract.
 

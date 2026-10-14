@@ -299,7 +299,7 @@ def qualify_laya(
     client = client_factory(endpoint_url, token, timeout=min(timeout_seconds, MAX_TIMEOUT_SECONDS))
     try:
         health = client.health()
-        if health.get("schema_version") != "4" or health.get("model") != MODEL:
+        if health.get("schema_version") != "5" or health.get("model") != MODEL:
             raise RuntimeError(
                 "endpoint health reports a different schema or pinned model revision"
             )
@@ -308,6 +308,9 @@ def qualify_laya(
             raise RuntimeError(
                 "endpoint runtime image identity differs from the requested immutable digest"
             )
+        checkpoint_mount = health.get("checkpoint_mount")
+        if not isinstance(checkpoint_mount, dict) or not checkpoint_mount.get("checkpoint_files"):
+            raise RuntimeError("endpoint health omits checkpoint-mount diagnostics")
         required = {
             "integrated_gradients",
             "fixed_candidate_margin",
@@ -326,6 +329,7 @@ def qualify_laya(
             "runtime": runtime,
             "configured_image_digest": image_digest,
             "candidate_ids": candidate_ids,
+            "checkpoint_mount": checkpoint_mount,
             "reference_candidate_id": reference_id,
             "target_candidate_ids": target_ids,
             "batch_sizes": list(BATCH_SIZES),
@@ -363,7 +367,7 @@ def qualify_laya(
                         ]
                         corpus_sha = sha256_json(endpoint_samples)
                         request = {
-                            "schema_version": "4",
+                            "schema_version": "5",
                             "request_id": (
                                 f"laya-qualification-{task_id}-{target_id}-{batch_size}-r{repeat}-"
                                 f"c{chunk_index}-{corpus_sha[:12]}"
@@ -478,6 +482,7 @@ def qualify_laya(
             "task_id": task_id,
             "plan_sha256": sha256_json(plan),
             "runtime": runtime,
+            "checkpoint_mount": checkpoint_mount,
             "comparison": comparison,
             "bank_sha256": [sha256_json(bank) for bank in banks],
             "measured_cost": {

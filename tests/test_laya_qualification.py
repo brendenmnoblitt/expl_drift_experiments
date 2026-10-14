@@ -38,9 +38,15 @@ class FakeClient:
 
     def health(self):
         return {
-            "schema_version": "4",
+            "schema_version": "5",
             "model": MODEL,
             "runtime": {"configured_image_digest": IMAGE},
+            "checkpoint_mount": {
+                "checkpoint_artifact_sha256": "b" * 64,
+                "checkpoint_files": [
+                    {"path": "hub_model_info.json", "size_bytes": 1, "sha256": "c" * 64}
+                ],
+            },
             "capabilities": [
                 "integrated_gradients",
                 "fixed_candidate_margin",
@@ -157,6 +163,13 @@ def test_tasks_qualify_all_fixed_margins_with_bounded_persisted_requests(
     assert all(event["status"] == "completed" for event in events)
     assert report["comparison"]["numerical_comparison_passed"]
     assert report["measured_cost"]["requests_completed"] == expected_requests
+    assert all(request["schema_version"] == "5" for request in client.calls)
+    assert all(
+        "checkpoint_artifact_sha256" not in request["runtime"]
+        and "checkpoint_files" not in request["runtime"]
+        for request in client.calls
+    )
+    assert "checkpoint_mount" in report
     plan = json.loads((output / "comparison-plan.json").read_text())
     assert plan["max_total_gradient_evaluations"] == gradient_budget
     assert plan["max_gradient_evaluations_per_target"] == MAX_GRADIENT_EVALUATIONS_PER_TARGET

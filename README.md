@@ -100,31 +100,54 @@ for logits, probabilities, representations, and attributions were all zero at
 and
 `results/research-extension-data/remote-laya-qualification-v3/ag-news-2026-10-13-singleton-b9d69a1/qualification.json`.
 
-The YouTube and AG News runs and a separate health-only cold start reported
-three different legacy checkpoint-artifact fingerprints despite the same
-configured image and pinned model revision. Those reports contain no
-per-file manifests, so the historical differing paths remain unknown.
-Schema 3 matched loaded model-state hashes across two health-only starts but
+The three historical observations use different checkpoint-artifact fingerprints
+despite the same configured image and pinned model revision. Their reports did
+not retain per-file manifests, so the exact historical changing path remains
+unknown. Schema 3 matched loaded-weight hashes on two health-only starts but
 omitted tokenizer and encoder-config identity.
 
-Schema 4 adds the legacy whole-mount hash and per-file path/size/SHA-256
-manifest, loaded weights, tokenizer settings, and encoder config. Image
+Schema 4 added loaded weights, tokenizer settings, encoder config, and a full
+non-hidden `/repository` manifest. Image
 `sha256:b1c3babab9dca9481a87b30f67074a706dd50aee80a72a6f6cade20fd2184487`
-from commit `e722e3ae6908c78606445fbd3b2432a0019828c0`, built by [workflow
-38496718586](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38496718586),
-was deployed to the existing L4 x1 endpoint with scaling unchanged. Two
-separate pause/resume cold starts produced identical per-file mount manifests,
-model-state, tokenizer, config, implementation, and settings hashes. Both
-health checks reported schema 4 `ready`; they made zero extraction requests
-and zero gradient evaluations. The endpoint is paused. This does not identify
-which historical mount file differed or qualify any signal. Full manifest and
-identity evidence:
-`results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-14-schema4/attempt-summary.json`.
-G1 remains unqualified, and old task-run signals remain separate. No
-held-out evaluation ran.
-The earlier task-runner intervals estimate about $0.70 at the listed
-$0.80/hour, before startup/minimums. Billing for image publication and
-health-only startups was unavailable. No main merge or paper tags changed.
+from commit `e722e3ae6908c78606445fbd3b2432a0019828c0` was built by [workflow
+38496718586](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38496718586)
+and deployed to the existing L4 x1 endpoint with scaling unchanged. Two
+health-only cold starts matched at mount hash
+`e76303c71f83ea241f7bc4fe844c903f5bbaf5f589c2a013fc4d9a4f8d9e9ee7`.
+
+The subsequent bounded development qualification completed 22/22 YouTube and
+66/66 AG News requests (72,576 gradient evaluations total, no failures). Both
+tasks shared the exact schema-4 runtime fingerprint
+`920827aef0e534d9c48fa5f99df5596e1f051fcf7ea68ed054813e2503cc5173`.
+Batch sizes 1/4/8 and two repeats had prediction parity and zero maximum
+absolute discrepancies for logits, probabilities, representations, and
+attributions at `atol=rtol=1e-5`. Independently recomputed completeness gates
+passed for 48/48 YouTube and 144/144 AG News attributions. The bank included
+truncation in 1/8 YouTube and 4/8 AG News examples; slowest requests were
+186.9s and 155.7s. Total runner wall time was 55.5 minutes; endpoint
+resume-to-pause was 55.3 minutes, or about $0.74 at the listed $0.80/hour
+before startup/minimums. User-approved target was $5; actual billing is
+unavailable.
+
+Per-file comparison of the health-only and extraction starts found the only
+changed mount entry was `hub_model_info.json` (4,840 bytes; SHA-256
+`bb19ecce8e7aa40497807a9630a26a4d359769d8f6aa490f24ee1c0d9b5e26bf` to
+`c9152fed5b6e22ef4eed798aa32f8810d1953910b08d87eb8a15b9fc70a39cd2`);
+the other 38 files matched. Hugging Face returned 404 for that filename at the
+pinned model revision. Loaded weights, tokenizer, config, implementation, and
+settings remained identical. This explains the observed schema-4 mount-hash
+change and is consistent with, but does not prove, the source of the three
+historical hashes. Schema 4 still includes mutable mount metadata in runtime
+identity; distinct schema-4 fingerprints remain non-combinable.
+
+Schema 5 is being implemented locally to separate semantic runtime identity
+(loaded model/tokenizer/config, implementation, settings, software, device, and
+configured image) from the diagnostic checkpoint-mount manifest returned by
+`/health`. It is not deployed or qualified. Schema-4 results cannot qualify
+schema 5; the endpoint remains paused, no held-out evaluation ran, and G1
+remains open. Full schema-4 evidence:
+`results/research-extension-data/remote-laya-qualification-v4/attempt-summary.json`.
+No main merge or paper tags changed.
 
 ### Corrected corpus and immutable schedules
 
@@ -292,17 +315,20 @@ controls reuse the exact same scores and alter host-side labels only.
 
 ## Remote Laya development and historical pilots
 
-The active host runner uses [endpoint schema 2](endpoint/README.md): fixed
+The active host runner is updated locally for endpoint schema 5: fixed
 spam-minus-ham margins, unrounded temperature-scaled probabilities, document
-representations, exact runtime/batch fingerprints, and independently
-recalculable completeness. The data path now uses the corrected inventory and
-one representative per duplicate/template group. Its legacy window-count
-profiles remain development-only, not the seven-role primary study.
+representations, semantic runtime/batch fingerprints, and independently
+recalculable completeness. The full checkpoint-mount manifest is a health
+diagnostic, not a cache-key component. The schema-5 image is not yet published
+or deployed; the endpoint still runs schema 4. The data path uses the corrected
+inventory and one representative per duplicate/template group. Its legacy
+window-count profiles remain development-only, not the seven-role primary
+study.
 The development qualifier is endpoint-only; it does not load a local model.
 It requires exactly eight designated development examples for the selected
 corpus and preserves its frozen candidate order/reference. YouTube runs the
 spam-minus-ham margin; AG News runs each of the three non-reference class
-margins against world. It checks `/health` against schema 2, the pinned model,
+margins against world. It requires schema 5 from `/health`, the pinned model,
 required capabilities, and the requested immutable image digest before
 extraction. Run only after explicit approval for the corresponding request and
 gradient-evaluation ceiling:
