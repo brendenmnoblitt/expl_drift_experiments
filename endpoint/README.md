@@ -180,10 +180,15 @@ root README; these historical results do not imply it.
   historical records do not include per-file manifests; they cannot identify
   which path differed. Runtime schema now fingerprints sorted loaded model
   state tensors (names, dtype, shape and exact bytes) as `model_state_sha256`,
-  rather than the mutable mount tree. This is a runtime-identity correction,
-  not a qualification: deploy a new image and rerun G1 from the beginning.
-  Keep old reports separate; no same-runtime cross-task claim or G1 is
-  established. No held-out evaluation ran. The endpoint is paused.
+  This corrects runtime identity only; it does not qualify any signal.
+  Image `sha256:67c8a8e029323c3dad1fbbf9bdfb444b61ffe9c313685ce1230614dff96cc363`
+  is now deployed. Two paused/resumed health-only starts returned identical
+  schema-3 runtime identities and loaded model-state fingerprints; each made
+  zero extraction requests. Evidence is in
+  `../results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-14-schema3/`.
+  Identity stability is verified for these starts, not G1 qualification.
+  Keep old reports separate; no cross-task signal combination or held-out
+  evaluation occurred. The endpoint is paused.
 
 ### Remote pilot check on October 10 2026
 

@@ -107,15 +107,20 @@ health-only cold start returned a third fingerprint
 run values: `35b599d63dfa3816f29a8c1280499560e4950b5a5ebf6b75d1437a2769e1abd1`
 and `f81510fe53d225e1553f302b08fc724752b1c535cc6c0325320dd33dcb7f3c1a`).
 No extraction ran during that check; the endpoint was paused. The old runtime
-fingerprint covered all non-hidden `/repository` files. The saved reports lack
-per-file hashes, so the differing path cannot be identified. The endpoint now
-has an un-deployed schema-3 change that fingerprints loaded model-state tensors
-instead. Deploy and repeat runtime checks before combining runs; the exact
-cross-start stability is not yet verified. Neither bounded check establishes
-G1. No held-out evaluation ran. The endpoint remains paused.
-At the listed $0.80/hour, the
-two runner intervals estimate about $0.70 total before startup/minimums or other
-charges; the exact account bill is unavailable. No main merge or paper tags
+fingerprint covered all non-hidden `/repository` files; per-file hashes were
+not saved, so the exact differing path cannot be identified. Schema 3 now
+fingerprints loaded model-state tensors. Image
+`sha256:67c8a8e029323c3dad1fbbf9bdfb444b61ffe9c313685ce1230614dff96cc363`
+was deployed. Two separate paused/resumed health-only starts returned matching
+runtime identities and model-state fingerprints; each made zero extraction
+requests. Evidence:
+`results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-14-schema3/attempt-summary.json`.
+The endpoint is paused. This verifies identity stability for two starts only;
+G1 remains unqualified, and old task-run signals remain separate. No held-out
+evaluation ran.
+The two earlier runner intervals estimate about $0.70 at the listed $0.80/hour,
+before startup/minimums. Billing for this image publication and two health-only
+startups was not available; no extraction ran. No main merge or paper tags
 changed.
 
 ### Corrected corpus and immutable schedules
