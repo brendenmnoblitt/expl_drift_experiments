@@ -330,7 +330,7 @@ controls reuse the exact same scores and alter host-side labels only.
 
 ## Remote Laya development and historical pilots
 
-The active host runner is updated locally for endpoint schema 5: fixed
+The active host runner targets endpoint schema 5: fixed
 spam-minus-ham margins, unrounded temperature-scaled probabilities, document
 representations, semantic runtime/batch fingerprints, and independently
 recalculable completeness. The full checkpoint-mount manifest is a health

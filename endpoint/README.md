@@ -125,7 +125,7 @@ concatenation does not claim that the parent batch was executed. Cache/resume
 rejects changed text, targets, precision, semantic runtime, image, and batch
 context.
 
-Schema 4 is deployed on the existing endpoint. Two health-only pause/resume
+Schema 4 was previously deployed on the existing endpoint. Two health-only pause/resume
 cold starts matched, but the subsequent G1 extraction start differed only in
 `hub_model_info.json` (4,840 bytes); the other 38 mount files and loaded model,
 tokenizer, config, implementation, and settings hashes matched. Hugging Face
