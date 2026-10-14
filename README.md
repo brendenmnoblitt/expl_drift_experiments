@@ -100,27 +100,31 @@ for logits, probabilities, representations, and attributions were all zero at
 and
 `results/research-extension-data/remote-laya-qualification-v3/ag-news-2026-10-13-singleton-b9d69a1/qualification.json`.
 
-The YouTube and AG News runs have different checkpoint-artifact fingerprints
-despite the same configured image and pinned model revision. A separate
-health-only cold start returned a third fingerprint
-(`a3f80ff3984e86b0d48879cbfed9c8bd4025d5f0c8e8729227a1d7f653d23b01`; prior
-run values: `35b599d63dfa3816f29a8c1280499560e4950b5a5ebf6b75d1437a2769e1abd1`
-and `f81510fe53d225e1553f302b08fc724752b1c535cc6c0325320dd33dcb7f3c1a`).
-No extraction ran during the health-only checks. The old runtime fingerprint
-covered all non-hidden `/repository` files, but the historical reports saved
-no per-file manifests; the specific differing paths remain unknown. Schema 3
-fingerprinted loaded model-state tensors and matched on two cold starts, but
-omitted tokenizer and encoder-config identity. A local schema-4 change now adds
-the legacy tree hash, per-file hashes, loaded weights, tokenizer settings and
-encoder config. It is not deployed. The endpoint remains paused. Evidence for
-the schema-3 checks:
-`results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-14-schema3/attempt-summary.json`.
-G1 remains unqualified; old task-run signals remain separate. No held-out
-evaluation ran.
-The two earlier runner intervals estimate about $0.70 at the listed $0.80/hour,
-before startup/minimums. Billing for this image publication and two health-only
-startups was not available; no extraction ran. No main merge or paper tags
-changed.
+The YouTube and AG News runs and a separate health-only cold start reported
+three different legacy checkpoint-artifact fingerprints despite the same
+configured image and pinned model revision. Those reports contain no
+per-file manifests, so the historical differing paths remain unknown.
+Schema 3 matched loaded model-state hashes across two health-only starts but
+omitted tokenizer and encoder-config identity.
+
+Schema 4 adds the legacy whole-mount hash and per-file path/size/SHA-256
+manifest, loaded weights, tokenizer settings, and encoder config. Image
+`sha256:b1c3babab9dca9481a87b30f67074a706dd50aee80a72a6f6cade20fd2184487`
+from commit `e722e3ae6908c78606445fbd3b2432a0019828c0`, built by [workflow
+38496718586](https://github.com/brendenmnoblitt/expl_drift_experiments/actions/runs/38496718586),
+was deployed to the existing L4 x1 endpoint with scaling unchanged. Two
+separate pause/resume cold starts produced identical per-file mount manifests,
+model-state, tokenizer, config, implementation, and settings hashes. Both
+health checks reported schema 4 `ready`; they made zero extraction requests
+and zero gradient evaluations. The endpoint is paused. This does not identify
+which historical mount file differed or qualify any signal. Full manifest and
+identity evidence:
+`results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-14-schema4/attempt-summary.json`.
+G1 remains unqualified, and old task-run signals remain separate. No
+held-out evaluation ran.
+The earlier task-runner intervals estimate about $0.70 at the listed
+$0.80/hour, before startup/minimums. Billing for image publication and
+health-only startups was unavailable. No main merge or paper tags changed.
 
 ### Corrected corpus and immutable schedules
 

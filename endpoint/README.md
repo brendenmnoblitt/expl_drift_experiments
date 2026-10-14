@@ -121,7 +121,11 @@ running image. The host independently recalculates probabilities, margins and
 completeness. Split requests retain each child's exact execution identity;
 concatenation does not claim that the parent batch was executed. Cache/resume
 rejects changed text, targets, precision, runtime, image, and batch context.
-Schema 4 captures the expanded runtime identity and is not yet deployed.
+Schema 4 is deployed on the existing endpoint. Two separate health-only
+pause/resume cold starts matched the per-file mount manifest and expanded
+runtime identity; they do not resolve the historical file drift or qualify
+signals. The endpoint is paused. Evidence is recorded at
+`../results/research-extension-data/remote-laya-qualification-v3/runtime-fingerprint-check-2026-10-14-schema4/attempt-summary.json`.
 Schema-1 through schema-3 caches remain historical and are not resumed under
 this contract.
 
