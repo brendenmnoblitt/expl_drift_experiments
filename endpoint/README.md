@@ -142,12 +142,13 @@ was built from commit `3d0cb0861c884ae89ab6820d8fe05f570c3942b8` in workflow
 unchanged. Two health-only cold starts matched all semantic runtime fields and
 all 39 checkpoint files. `scientifically_qualified` remains false.
 
-The fresh YouTube qualification attempt failed local CLI preflight because no
-`HF_TOKEN`/`HUGGINGFACE_HUB_TOKEN` was passed; no health or extraction request
-was made by the qualifier. The endpoint was paused, with 0 extraction requests
-and 0 gradient evaluations. The approved run forbids retries after failure;
-renewed authorization is required before another attempt. Schema-4 extraction
-results cannot qualify schema 5. Evidence is in
+Both YouTube qualifier invocations failed local preflight before any HTTP
+request. The first lacked `HF_TOKEN`/`HUGGINGFACE_HUB_TOKEN`; the one renewed
+attempt supplied the saved token but omitted `LAYA_ENDPOINT_URL` and
+`LAYA_ENDPOINT_IMAGE_DIGEST`. Total: 0 extraction requests and 0 gradients.
+The endpoint is paused; the renewed attempt is consumed, so another run needs
+new explicit authorization. Schema-4 extraction results cannot qualify schema
+5. Evidence is in
 `../results/research-extension-data/remote-laya-qualification-v5/`. Schema-1
 through schema-3 caches remain historical and are not resumed under this
 contract.

@@ -152,13 +152,14 @@ health-only cold starts matched every semantic runtime field and the complete
 SHA-256 `34830ef9c04d8080aa4245a359c601a3212c68c880e0b35c2902cb7785b6b804`).
 The service reports `scientifically_qualified: false`.
 
-Fresh signal qualification has not run. The first YouTube CLI attempt failed
-local preflight because `HF_TOKEN`/`HUGGINGFACE_HUB_TOKEN` was absent; no HTTP
-health or extraction request was made by that attempt (0 requests, 0 gradients).
-The endpoint was paused. The approved run allowed no retries after failure, so
-there will be no second attempt without renewed authorization. Schema-4 results
-do not qualify schema 5; G1 remains open, held-out evaluation remains sealed.
-Health evidence and the failed preflight are in
+Fresh signal qualification has not run. Both YouTube CLI invocations failed
+local preflight before any HTTP request. The first lacked
+`HF_TOKEN`/`HUGGINGFACE_HUB_TOKEN`; the single user-authorized renewed attempt
+supplied the saved token but omitted `LAYA_ENDPOINT_URL` and
+`LAYA_ENDPOINT_IMAGE_DIGEST`. Total extraction requests and gradients: zero.
+The endpoint was paused after each failure. Further retry requires new explicit
+authorization. Schema-4 results do not qualify schema 5; G1 remains open,
+held-out evaluation remains sealed. Health evidence and both failures are in
 `results/research-extension-data/remote-laya-qualification-v5/`. Full schema-4
 evidence:
 `results/research-extension-data/remote-laya-qualification-v4/attempt-summary.json`.
@@ -336,9 +337,11 @@ representations, semantic runtime/batch fingerprints, and independently
 recalculable completeness. The full checkpoint-mount manifest is a health
 diagnostic, not a cache-key component. The schema-5 image is deployed on the
 existing endpoint; two health-only cold starts matched semantic identity and
-all 39 checkpoint files. The failed YouTube qualification stopped before any
-HTTP request because the CLI received no token environment variable. The
-endpoint is paused; no extraction or window study has run.
+all 39 checkpoint files.
+Two YouTube attempts failed local preflight before any HTTP request: first the
+token variable was absent; the renewed wrapper later omitted URL and image
+digest variables. The endpoint is paused; no extraction or window study ran,
+and another attempt requires renewed authorization.
 The data path uses the corrected inventory and one representative per
 duplicate/template group. Legacy window-count profiles remain development-only,
 not the seven-role primary study.
